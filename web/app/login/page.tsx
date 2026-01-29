@@ -23,7 +23,7 @@ export default function LoginPage() {
         try {
             const supabase = createClient()
             const { error } = await supabase.auth.signInWithPassword({
-                email,
+                email: email.trim(),
                 password
             })
 
@@ -49,9 +49,9 @@ export default function LoginPage() {
         setIsLoading(true)
         try {
             const supabase = createClient()
-            console.log("Attempting Sign Up with:", email)
+            console.log("Attempting Sign Up with:", email.trim())
             const { data, error } = await supabase.auth.signUp({
-                email,
+                email: email.trim(),
                 password
             })
             if (error) {
