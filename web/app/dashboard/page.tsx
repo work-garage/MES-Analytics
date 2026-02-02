@@ -2,7 +2,7 @@
 
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Factory, Cog, ClipboardCheck, Truck, Users, Package, Database } from "lucide-react"
+import { Factory, Cog, ClipboardCheck, Truck, Users, Package, Database, Activity } from "lucide-react"
 import Link from "next/link"
 
 export default function MainDashboard() {
@@ -127,6 +127,23 @@ export default function MainDashboard() {
                         <Link href="/recipes">
                             <Button variant="outline" className="w-full justify-start">Recipe Manager</Button>
                         </Link>
+                    </CardContent>
+                </Card>
+
+                {/* Analytics */}
+                <Card className="hover:shadow-lg transition-shadow border-blue-200 bg-blue-50">
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <Activity className="h-6 w-6 text-blue-700" />
+                            Analytics & Insights
+                        </CardTitle>
+                        <CardDescription>Visual dashboards for KPIs and trends.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-2">
+                        <Link href="/insights">
+                            <Button className="w-full justify-start bg-blue-600 hover:bg-blue-700 text-white">Full Analytics Dashboard</Button>
+                        </Link>
+                        <Button variant="ghost" className="w-full justify-start text-slate-500" disabled>Daily Report (Coming Soon)</Button>
                     </CardContent>
                 </Card>
 
