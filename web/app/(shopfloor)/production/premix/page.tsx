@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { useForm, Controller } from 'react-hook-form'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -17,6 +16,8 @@ import { ManualFallbackToggle } from '@/components/ui/manual-fallback-toggle'
 
 export default function PremixLogPage() {
     const router = useRouter()
+    const [isManual, setIsManual] = useState(false)
+    const sensorStatus = isManual ? 'OFFLINE' : 'ONLINE'
 
     const form = useForm({
         defaultValues: {

@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { useForm, Controller } from 'react-hook-form'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery } from '@tanstack/react-query'
@@ -17,6 +16,19 @@ import { Truck } from 'lucide-react'
 export default function DispatchPage() {
     const router = useRouter()
     const supabase = createClient()
+
+    const { data: batches } = useQuery({
+        queryKey: ['fg-batches-avail'],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('fg_batches')
+                .select('id, batch_no, sku_code, quantity_units')
+                .gt('quantity_units', 0)
+
+            if (error) throw error
+            return data || []
+        },
+    })
 
     const form = useForm({
         defaultValues: {
@@ -69,7 +81,7 @@ export default function DispatchPage() {
                                         <SelectContent>
                                             {batches?.map((b: any) => (
                                                 <SelectItem key={b.id} value={b.id}>
-                                                    {b.batch_no} ({b.sku}) - Avail: {b.available}
+                                                    {b.batch_no} ({b.sku_code}) - Avail: {b.quantity_units}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
