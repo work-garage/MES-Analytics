@@ -75,14 +75,26 @@ function QAPageContent() {
             manual_hold_reason: '',
             defect_type: 'None',
             defect_other_description: '',
-            defect_other_description: '',
             remarks: '',
+            sugar_appearance: 'OK',
+            sugar_taste: 'OK',
+            sugar_free_from: 'OK',
+            sugar_moisture: 0,
             sugar_sucrose_pct: 98,
             sugar_water_insoluble_pct: 0,
             sugar_so2_ppm: 0,
-            wheat_gluten_pct: 8,
-            wheat_ash_pct: 0.5,
-            wheat_color: 'Normal',
+            sugar_packing: 'OK',
+            wheat_appearance: 'OK',
+            wheat_infestation: 'OK',
+            wheat_free_from: 'OK',
+            wheat_taste: 'OK',
+            wheat_moisture: 0,
+            wheat_ash: 0,
+            wheat_ash_insoluble: 0,
+            wheat_alcoholic_acidity: 0,
+            wheat_gluten: 0,
+            wheat_sedimentation: 0,
+            wheat_packing: 'OK',
             lab_photo: null
         }
     })
@@ -159,24 +171,42 @@ function QAPageContent() {
         if (!values.vendor_expiry_date) failedChecks.push('Vendor Expiry (Missing)')
         if (!values.itc_expiry_date) failedChecks.push('ITC Expiry (Primary) (Missing)')
 
-        if (values.appearance !== 'OK') failedChecks.push('Appearance')
-        if (!['Sweet, free from objectionable odour/taste', 'OK', 'Normal'].includes(values.taste_and_smell)) failedChecks.push('Taste & Smell')
-        if (!['None', 'Yes'].includes(values.free_from)) failedChecks.push('Contaminants')
-        if (values.packing_condition !== 'OK') failedChecks.push('Packing Condition')
-        if (values.defect_type !== 'None') failedChecks.push('Defect Category')
-        if (Number(values.moisture_pct) > 0.1) failedChecks.push(`Moisture (${values.moisture_pct}%)`)
-        if (values.foreign_matter) failedChecks.push('Foreign Matter Detected')
-
         const matName = gateEntry?.materials?.name?.toUpperCase() || '';
-        if (matName.includes('SUGAR')) {
+        const isSugar = matName.includes('SUGAR');
+        const isWheat = matName.includes('WHEAT FLOUR') || matName.includes('MAIDA');
+
+        if (isSugar) {
+            if (values.sugar_appearance !== 'OK') failedChecks.push('Appearance')
+            if (values.sugar_taste !== 'OK') failedChecks.push('Taste & Smell')
+            if (values.sugar_free_from !== 'OK') failedChecks.push('Free From Contaminants')
+            if (Number(values.sugar_moisture) > 0.1) failedChecks.push(`Moisture (${values.sugar_moisture}% > 0.1%)`)
             if (Number(values.sugar_sucrose_pct) < 98) failedChecks.push(`Sucrose (${values.sugar_sucrose_pct}% < 98%)`)
             if (Number(values.sugar_water_insoluble_pct) > 0.1) failedChecks.push(`Water Insoluble (${values.sugar_water_insoluble_pct}% > 0.1%)`)
-            if (Number(values.sugar_so2_ppm) > 70) failedChecks.push(`SO2 (${values.sugar_so2_ppm}ppm > 70ppm)`)
-        } else if (matName.includes('WHEAT FLOUR')) {
-            if (Number(values.wheat_gluten_pct) < 8) failedChecks.push(`Gluten (${values.wheat_gluten_pct}% < 8%)`)
-            if (Number(values.wheat_ash_pct) > 0.5) failedChecks.push(`Total Ash (${values.wheat_ash_pct}% > 0.5%)`)
-            if (values.wheat_color !== 'Normal') failedChecks.push(`Color (${values.wheat_color})`)
+            if (Number(values.sugar_so2_ppm) > 70) failedChecks.push(`SO2 (${values.sugar_so2_ppm}ppm > 70)`)
+            if (values.sugar_packing !== 'OK') failedChecks.push('Packing Condition')
+        } else if (isWheat) {
+            if (values.wheat_appearance !== 'OK') failedChecks.push('Appearance')
+            if (values.wheat_infestation !== 'OK') failedChecks.push('Infestation')
+            if (values.wheat_free_from !== 'OK') failedChecks.push('Free From')
+            if (values.wheat_taste !== 'OK') failedChecks.push('Taste & Smell')
+            if (Number(values.wheat_moisture) > 14) failedChecks.push(`Moisture (${values.wheat_moisture}% > 14%)`)
+            if (Number(values.wheat_ash) > 1.0) failedChecks.push(`Total Ash (${values.wheat_ash}% > 1.0%)`)
+            if (Number(values.wheat_ash_insoluble) > 0.05) failedChecks.push(`Ash Insoluble (${values.wheat_ash_insoluble}% > 0.05%)`)
+            if (Number(values.wheat_alcoholic_acidity) > 0.1) failedChecks.push(`Alcoholic Acidity (${values.wheat_alcoholic_acidity}% > 0.1%)`)
+            const gluten = Number(values.wheat_gluten);
+            if (gluten < 7.5 || gluten > 11.0) failedChecks.push(`Gluten (${gluten}% out of 7.5-11.0% range)`)
+            if (Number(values.wheat_sedimentation) < 20) failedChecks.push(`Sedimentation (${values.wheat_sedimentation} < 20)`)
+            if (values.wheat_packing !== 'OK') failedChecks.push('Packing Condition')
+        } else {
+            if (values.appearance !== 'OK') failedChecks.push('Appearance')
+            if (!['Sweet, free from objectionable odour/taste', 'OK', 'Normal'].includes(values.taste_and_smell)) failedChecks.push('Taste & Smell')
+            if (!['None', 'Yes'].includes(values.free_from)) failedChecks.push('Contaminants')
+            if (values.packing_condition !== 'OK') failedChecks.push('Packing Condition')
+            if (Number(values.moisture_pct) > 0.1) failedChecks.push(`Moisture (${values.moisture_pct}%)`)
+            if (values.foreign_matter) failedChecks.push('Foreign Matter Detected')
         }
+
+        if (values.defect_type !== 'None') failedChecks.push('Defect Category')
 
         if (failedChecks.length > 0) {
             toast.error(`Cannot Accept. Fix or HOLD/REJECT due to: ${failedChecks.join(', ')}`)
@@ -536,48 +566,206 @@ function QAPageContent() {
                                     <Label className="font-semibold text-slate-700 text-base border-b pb-2 block">
                                         8. Material Specific QA ({gateEntry?.materials?.name})
                                     </Label>
-                                    
+
                                     {isSugar && (
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
                                             <div className="space-y-2">
-                                                <Label className="font-medium text-slate-700">Sucrose % (Min 98%)</Label>
+                                                <Label className="font-medium text-slate-700">1. Appearance</Label>
+                                                <p className="text-xs text-slate-500 line-clamp-2">White translucent crystals free from dirt & extraneous matter</p>
+                                                <Controller control={control} name="sugar_appearance" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="OK">OK</SelectItem>
+                                                            <SelectItem value="Not OK">Not OK</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">2. Taste & Smell</Label>
+                                                <p className="text-xs text-slate-500 line-clamp-2">Sweet in taste free from any fermented/objectionable odour</p>
+                                                <Controller control={control} name="sugar_taste" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="OK">OK</SelectItem>
+                                                            <SelectItem value="Not OK">Not OK</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">3. Free from</Label>
+                                                <p className="text-xs text-slate-500 line-clamp-2">Dirt, filth, iron filings and added colouring matter</p>
+                                                <Controller control={control} name="sugar_free_from" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="OK">OK</SelectItem>
+                                                            <SelectItem value="Not OK">Not OK</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">4. Moisture (0.1% max)</Label>
+                                                <Input type="number" step="0.01" {...register('sugar_moisture', { valueAsNumber: true })}
+                                                    className={Number(watch('sugar_moisture')) > 0.1 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('sugar_moisture')) > 0.1 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Exceeds max threshold (0.1%)</p></div>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">5. Sucrose % (Min 98%)</Label>
                                                 <Input type="number" step="0.01" {...register('sugar_sucrose_pct', { valueAsNumber: true })}
                                                     className={Number(watch('sugar_sucrose_pct')) < 98 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('sugar_sucrose_pct')) < 98 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Below min threshold (98%)</p></div>
+                                                )}
                                             </div>
                                             <div className="space-y-2">
-                                                <Label className="font-medium text-slate-700">Water Insoluble % (Max 0.1%)</Label>
-                                                <Input type="number" step="0.01" {...register('sugar_water_insoluble_pct', { valueAsNumber: true })} 
+                                                <Label className="font-medium text-slate-700">6. Water Insoluble % (Max 0.1%)</Label>
+                                                <Input type="number" step="0.01" {...register('sugar_water_insoluble_pct', { valueAsNumber: true })}
                                                     className={Number(watch('sugar_water_insoluble_pct')) > 0.1 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('sugar_water_insoluble_pct')) > 0.1 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Exceeds max threshold (0.1%)</p></div>
+                                                )}
                                             </div>
                                             <div className="space-y-2">
-                                                <Label className="font-medium text-slate-700">SO2 ppm (Max 70)</Label>
+                                                <Label className="font-medium text-slate-700">7. Sulphur Di-oxide ppm (Max 70)</Label>
                                                 <Input type="number" step="1" {...register('sugar_so2_ppm', { valueAsNumber: true })}
                                                     className={Number(watch('sugar_so2_ppm')) > 70 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('sugar_so2_ppm')) > 70 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Exceeds max threshold (70 ppm)</p></div>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">8. Packing Condition</Label>
+                                                <Controller control={control} name="sugar_packing" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="OK">Ok</SelectItem>
+                                                            <SelectItem value="Not OK">Not ok</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
                                             </div>
                                         </div>
                                     )}
 
                                     {isWheat && (
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-2">
                                             <div className="space-y-2">
-                                                <Label className="font-medium text-slate-700">Gluten % (Min 8%)</Label>
-                                                <Input type="number" step="0.1" {...register('wheat_gluten_pct', { valueAsNumber: true })} 
-                                                    className={Number(watch('wheat_gluten_pct')) < 8 ? 'border-orange-400 bg-orange-50/30' : ''} />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label className="font-medium text-slate-700">Total Ash % (Max 0.5%)</Label>
-                                                <Input type="number" step="0.01" {...register('wheat_ash_pct', { valueAsNumber: true })} 
-                                                    className={Number(watch('wheat_ash_pct')) > 0.5 ? 'border-orange-400 bg-orange-50/30' : ''} />
-                                            </div>
-                                            <div className="space-y-2">
-                                                <Label className="font-medium text-slate-700">Color / Bran Specks</Label>
-                                                <Controller control={control} name="wheat_color" render={({ field }) => (
+                                                <Label className="font-medium text-slate-700">1. Appearance</Label>
+                                                <p className="text-xs text-slate-500 line-clamp-2">White/creamy, no dusted bran, free flowing, no lumps</p>
+                                                <Controller control={control} name="wheat_appearance" render={({ field }) => (
                                                     <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                        <SelectTrigger className={field.value !== 'Normal' ? 'border-orange-400 bg-orange-50/30' : ''}><SelectValue /></SelectTrigger>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
                                                         <SelectContent>
-                                                            <SelectItem value="Normal">Normal (Creamy White)</SelectItem>
-                                                            <SelectItem value="High Specks">High Bran Specks</SelectItem>
-                                                            <SelectItem value="Discolored">Discolored</SelectItem>
+                                                            <SelectItem value="OK">OK</SelectItem>
+                                                            <SelectItem value="Not OK">Not OK</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">2. Infestation & Extraneous matter</Label>
+                                                <p className="text-xs text-slate-500 line-clamp-2">No insect, fungus, rodent contamination, dirt</p>
+                                                <Controller control={control} name="wheat_infestation" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="OK">OK</SelectItem>
+                                                            <SelectItem value="Not OK">Not OK</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">3. Free from</Label>
+                                                <p className="text-xs text-slate-500 line-clamp-2">Rodent hair and excreta</p>
+                                                <Controller control={control} name="wheat_free_from" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="OK">OK</SelectItem>
+                                                            <SelectItem value="Not OK">Not OK</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">4. Taste & Smell (Drink Test)</Label>
+                                                <p className="text-xs text-slate-500 line-clamp-2">No off/musty flavour, bitter/rancid taste</p>
+                                                <Controller control={control} name="wheat_taste" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="OK">OK</SelectItem>
+                                                            <SelectItem value="Not OK">Not OK</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">5. Moisture % (max 14.0%)</Label>
+                                                <Input type="number" step="0.1" {...register('wheat_moisture', { valueAsNumber: true })}
+                                                    className={Number(watch('wheat_moisture')) > 14 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('wheat_moisture')) > 14 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Exceeds max threshold (14.0%)</p></div>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">6. Total ash % (max 1.0%)</Label>
+                                                <Input type="number" step="0.01" {...register('wheat_ash', { valueAsNumber: true })}
+                                                    className={Number(watch('wheat_ash')) > 1.0 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('wheat_ash')) > 1.0 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Exceeds max threshold (1.0%)</p></div>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">7. Ash Insoluble in dilute HCL % (max 0.05%)</Label>
+                                                <Input type="number" step="0.01" {...register('wheat_ash_insoluble', { valueAsNumber: true })}
+                                                    className={Number(watch('wheat_ash_insoluble')) > 0.05 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('wheat_ash_insoluble')) > 0.05 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Exceeds max threshold (0.05%)</p></div>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">8. Alcoholic acidity % (max 0.1%)</Label>
+                                                <Input type="number" step="0.01" {...register('wheat_alcoholic_acidity', { valueAsNumber: true })}
+                                                    className={Number(watch('wheat_alcoholic_acidity')) > 0.1 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('wheat_alcoholic_acidity')) > 0.1 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Exceeds max threshold (0.1%)</p></div>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">9. Gluten Content %</Label>
+                                                <p className="text-xs text-slate-500 line-clamp-1">7.5-9 (short), 8.5-10 (hard)</p>
+                                                <Input type="number" step="0.1" {...register('wheat_gluten', { valueAsNumber: true })}
+                                                    className={(Number(watch('wheat_gluten')) < 7.5 || Number(watch('wheat_gluten')) > 11.0) ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {(Number(watch('wheat_gluten')) < 7.5 || Number(watch('wheat_gluten')) > 11.0) && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Outside acceptable range (7.5-11.0%)</p></div>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">10. Sedimentation Value (&gt;=20 ml)</Label>
+                                                <Input type="number" step="1" {...register('wheat_sedimentation', { valueAsNumber: true })}
+                                                    className={Number(watch('wheat_sedimentation')) < 20 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                                {Number(watch('wheat_sedimentation')) < 20 && (
+                                                    <div className="flex items-center gap-1.5 mt-1 text-orange-600 text-xs font-medium bg-orange-50 p-1.5 rounded border border-orange-100"><AlertTriangle className="h-3 w-3 shrink-0" /><p>Below min threshold (20 ml)</p></div>
+                                                )}
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">11. Packing Condition</Label>
+                                                <Controller control={control} name="wheat_packing" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="OK">Ok</SelectItem>
+                                                            <SelectItem value="Not OK">Not ok</SelectItem>
                                                         </SelectContent>
                                                     </Select>
                                                 )} />
