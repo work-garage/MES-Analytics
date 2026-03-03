@@ -8,15 +8,15 @@ export function BackButton() {
     const router = useRouter()
 
     return (
-        <Button 
-            variant="ghost" 
-            size="sm" 
+        <Button
+            variant="outline"
+            size="sm"
             onClick={() => router.back()}
-            className="flex items-center gap-2 text-slate-600 hover:text-slate-900"
+            className="flex items-center gap-1.5 border-slate-300 text-slate-700 hover:bg-slate-100"
             title="Go Back"
         >
             <ArrowLeft className="h-4 w-4" />
-            <span className="hidden sm:inline">Back</span>
+            <span>Back</span>
         </Button>
     )
 }
