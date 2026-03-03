@@ -6,7 +6,7 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
 async function run() {
-    const { data, error } = await supabase.from('gate_entries').select('*').limit(1)
+    const { data, error } = await supabase.from('qa_inspections').select('*').limit(1)
     console.log(data ? Object.keys(data[0]) : error)
 }
 run()

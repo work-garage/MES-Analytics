@@ -75,7 +75,14 @@ function QAPageContent() {
             manual_hold_reason: '',
             defect_type: 'None',
             defect_other_description: '',
+            defect_other_description: '',
             remarks: '',
+            sugar_sucrose_pct: 98,
+            sugar_water_insoluble_pct: 0,
+            sugar_so2_ppm: 0,
+            wheat_gluten_pct: 8,
+            wheat_ash_pct: 0.5,
+            wheat_color: 'Normal',
             lab_photo: null
         }
     })
@@ -159,6 +166,17 @@ function QAPageContent() {
         if (values.defect_type !== 'None') failedChecks.push('Defect Category')
         if (Number(values.moisture_pct) > 0.1) failedChecks.push(`Moisture (${values.moisture_pct}%)`)
         if (values.foreign_matter) failedChecks.push('Foreign Matter Detected')
+
+        const matName = gateEntry?.materials?.name?.toUpperCase() || '';
+        if (matName.includes('SUGAR')) {
+            if (Number(values.sugar_sucrose_pct) < 98) failedChecks.push(`Sucrose (${values.sugar_sucrose_pct}% < 98%)`)
+            if (Number(values.sugar_water_insoluble_pct) > 0.1) failedChecks.push(`Water Insoluble (${values.sugar_water_insoluble_pct}% > 0.1%)`)
+            if (Number(values.sugar_so2_ppm) > 70) failedChecks.push(`SO2 (${values.sugar_so2_ppm}ppm > 70ppm)`)
+        } else if (matName.includes('WHEAT FLOUR')) {
+            if (Number(values.wheat_gluten_pct) < 8) failedChecks.push(`Gluten (${values.wheat_gluten_pct}% < 8%)`)
+            if (Number(values.wheat_ash_pct) > 0.5) failedChecks.push(`Total Ash (${values.wheat_ash_pct}% > 0.5%)`)
+            if (values.wheat_color !== 'Normal') failedChecks.push(`Color (${values.wheat_color})`)
+        }
 
         if (failedChecks.length > 0) {
             toast.error(`Cannot Accept. Fix or HOLD/REJECT due to: ${failedChecks.join(', ')}`)
@@ -504,6 +522,71 @@ function QAPageContent() {
                                 </div>
                             </div>
                         </div>
+
+                        {/* 8. Material Specific Checks */}
+                        {(() => {
+                            const matName = gateEntry?.materials?.name?.toUpperCase() || '';
+                            const isSugar = matName.includes('SUGAR');
+                            const isWheat = matName.includes('WHEAT FLOUR');
+
+                            if (!isSugar && !isWheat) return null;
+
+                            return (
+                                <div className="space-y-4 bg-white p-4 rounded-lg border shadow-sm">
+                                    <Label className="font-semibold text-slate-700 text-base border-b pb-2 block">
+                                        8. Material Specific QA ({gateEntry?.materials?.name})
+                                    </Label>
+                                    
+                                    {isSugar && (
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">Sucrose % (Min 98%)</Label>
+                                                <Input type="number" step="0.01" {...register('sugar_sucrose_pct', { valueAsNumber: true })}
+                                                    className={Number(watch('sugar_sucrose_pct')) < 98 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">Water Insoluble % (Max 0.1%)</Label>
+                                                <Input type="number" step="0.01" {...register('sugar_water_insoluble_pct', { valueAsNumber: true })} 
+                                                    className={Number(watch('sugar_water_insoluble_pct')) > 0.1 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">SO2 ppm (Max 70)</Label>
+                                                <Input type="number" step="1" {...register('sugar_so2_ppm', { valueAsNumber: true })}
+                                                    className={Number(watch('sugar_so2_ppm')) > 70 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {isWheat && (
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">Gluten % (Min 8%)</Label>
+                                                <Input type="number" step="0.1" {...register('wheat_gluten_pct', { valueAsNumber: true })} 
+                                                    className={Number(watch('wheat_gluten_pct')) < 8 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">Total Ash % (Max 0.5%)</Label>
+                                                <Input type="number" step="0.01" {...register('wheat_ash_pct', { valueAsNumber: true })} 
+                                                    className={Number(watch('wheat_ash_pct')) > 0.5 ? 'border-orange-400 bg-orange-50/30' : ''} />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label className="font-medium text-slate-700">Color / Bran Specks</Label>
+                                                <Controller control={control} name="wheat_color" render={({ field }) => (
+                                                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                        <SelectTrigger className={field.value !== 'Normal' ? 'border-orange-400 bg-orange-50/30' : ''}><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Normal">Normal (Creamy White)</SelectItem>
+                                                            <SelectItem value="High Specks">High Bran Specks</SelectItem>
+                                                            <SelectItem value="Discolored">Discolored</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                )} />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
 
                         <Controller control={control} name="lab_photo" render={({ field }) => (
                             <PhotoCapture label="Lab Report / Sample (Optional)" onCapture={field.onChange} />
