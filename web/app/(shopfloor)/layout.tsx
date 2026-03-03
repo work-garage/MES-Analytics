@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/store/auth'
 import { Loader2, LogOut, Package, ClipboardCheck, Truck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
+import { BackButton } from '@/components/ui/back-button'
 
 export default function ShopfloorLayout({
     children,
@@ -39,11 +40,14 @@ export default function ShopfloorLayout({
         <div className="min-h-screen bg-slate-100 flex flex-col">
             {/* Tablet-optimized Header */}
             <header className="bg-white border-b px-4 h-16 flex items-center justify-between shadow-sm sticky top-0 z-10">
-                <div className="flex items-center gap-2">
-                    <div className="bg-blue-600 p-2 rounded-lg text-white">
-                        <Package className="h-6 w-6" />
+                <div className="flex items-center gap-4">
+                    <BackButton />
+                    <div className="flex items-center gap-2">
+                        <div className="bg-blue-600 p-2 rounded-lg text-white">
+                            <Package className="h-6 w-6" />
+                        </div>
+                        <span className="font-bold text-lg hidden sm:block">MES Shopfloor</span>
                     </div>
-                    <span className="font-bold text-lg hidden sm:block">MES Shopfloor</span>
                 </div>
 
                 <div className="flex items-center gap-4">
