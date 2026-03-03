@@ -2,8 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useForm, Controller } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { vehicleInspectionSchema } from '@/lib/validators/inbound'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/lib/store/auth'
@@ -58,15 +57,17 @@ function VehicleInspectionContent() {
     const supabase = createClient()
 
     const form = useForm({
-        resolver: zodResolver(vehicleInspectionSchema),
         defaultValues: {
-            floor_clean: true,
-            walls_clean: true,
-            tarpaulin_intact: true,
-            odour_ok: true,
-            moisture_absent: true,
-            seal_intact: true,
-            hazardous_history_ok: true,
+            condition_of_vehicle: 'OK',
+            tarpaulin_top_bottom: 'Present',
+            condition_of_tarpaulin: 'OK',
+            objectionable_odour: 'Absent',
+            dust_sand_cement_chemicals: 'Absent',
+            material_condition: 'OK',
+            external_contamination: 'No',
+            bulk_tanker_edible_oil_compliance: 'Yes',
+            seal_intact: 'Yes',
+            hazardous_material_history: 'No',
             remarks: ''
         }
     })
@@ -116,11 +117,20 @@ function VehicleInspectionContent() {
 
     const handleAccept = async () => {
         const values = form.getValues()
-        const checks = [
-            values.floor_clean, values.walls_clean, values.tarpaulin_intact,
-            values.odour_ok, values.moisture_absent, values.seal_intact, values.hazardous_history_ok
-        ]
-        if (!checks.every(Boolean)) {
+        // Check for positive combinations
+        const checksPassed =
+            values.condition_of_vehicle === 'OK' &&
+            values.tarpaulin_top_bottom === 'Present' &&
+            values.condition_of_tarpaulin === 'OK' &&
+            values.objectionable_odour === 'Absent' &&
+            values.dust_sand_cement_chemicals === 'Absent' &&
+            values.material_condition === 'OK' &&
+            values.external_contamination === 'No' &&
+            values.bulk_tanker_edible_oil_compliance === 'Yes' &&
+            values.seal_intact === 'Yes' &&
+            values.hazardous_material_history === 'No';
+
+        if (!checksPassed) {
             toast.error('Cannot Accept: some checklist items are failing.')
             return
         }
@@ -133,7 +143,7 @@ function VehicleInspectionContent() {
                 p_result: 'PASS',
                 p_remarks: values.remarks,
                 p_inspector_id: user?.id,
-                p_hazardous_history_ok: values.hazardous_history_ok
+                p_hazardous_history_ok: values.hazardous_material_history === 'No'
             })
             if (error) {
                 // Fallback: just update gate_entries status
@@ -292,13 +302,16 @@ function VehicleInspectionContent() {
                         </Alert>
                     )}
                     <div className="space-y-4">
-                        <CheckItem control={form.control} name="floor_clean" label="Floor Clean?" />
-                        <CheckItem control={form.control} name="walls_clean" label="Side Walls Clean?" />
-                        <CheckItem control={form.control} name="tarpaulin_intact" label="Tarpaulin Intact?" />
-                        <CheckItem control={form.control} name="odour_ok" label="No Abnormal Odour?" />
-                        <CheckItem control={form.control} name="moisture_absent" label="No Visible Moisture/Dust?" />
-                        <CheckItem control={form.control} name="seal_intact" label="Seal Intact?" />
-                        <CheckItem control={form.control} name="hazardous_history_ok" label="Hazardous Material History OK?" />
+                        <SelectCheckItem control={form.control} name="condition_of_vehicle" label="1. Condition of vehicle" options={[{ label: 'OK', value: 'OK', isGood: true }, { label: 'Not OK', value: 'Not OK', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="tarpaulin_top_bottom" label="2. Tarpaulin top & bottom" options={[{ label: 'Present', value: 'Present', isGood: true }, { label: 'Absent', value: 'Absent', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="condition_of_tarpaulin" label="3. Condition of tarpaulin" options={[{ label: 'OK', value: 'OK', isGood: true }, { label: 'Not OK', value: 'Not OK', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="objectionable_odour" label="4. Objectionable odour" options={[{ label: 'Absent', value: 'Absent', isGood: true }, { label: 'Present', value: 'Present', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="dust_sand_cement_chemicals" label="5. Dust / Sand / Cement / Chemicals" options={[{ label: 'Absent', value: 'Absent', isGood: true }, { label: 'Present', value: 'Present', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="material_condition" label="6. Material condition" options={[{ label: 'OK', value: 'OK', isGood: true }, { label: 'Not OK', value: 'Not OK', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="external_contamination" label="7. External contamination" options={[{ label: 'No', value: 'No', isGood: true }, { label: 'Yes', value: 'Yes', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="bulk_tanker_edible_oil_compliance" label="8. Bulk tanker edible oil compliance" options={[{ label: 'Yes', value: 'Yes', isGood: true }, { label: 'No', value: 'No', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="seal_intact" label="9. Seal intact" options={[{ label: 'Yes', value: 'Yes', isGood: true }, { label: 'No', value: 'No', isGood: false }]} />
+                        <SelectCheckItem control={form.control} name="hazardous_material_history" label="10. Hazardous material history" options={[{ label: 'No', value: 'No', isGood: true }, { label: 'Yes', value: 'Yes', isGood: false }]} />
 
                         <div className="space-y-2">
                             <Label>Remarks{' '}<span className="text-slate-400 font-normal text-xs">(required for Hold or Reject)</span></Label>
@@ -336,18 +349,29 @@ function VehicleInspectionContent() {
     )
 }
 
-function CheckItem({ control, name, label }: { control: any, name: string, label: string }) {
+function SelectCheckItem({ control, name, label, options }: { control: any, name: string, label: string, options: { label: string, value: string, isGood: boolean }[] }) {
     return (
-        <Controller control={control} name={name} render={({ field }) => (
-            <div className={`flex items-center justify-between p-3 rounded-lg border ${field.value ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                <div className="flex items-center gap-3">
-                    {field.value
-                        ? <CheckCircle className="text-green-600 h-5 w-5" />
-                        : <XCircle className="text-red-600 h-5 w-5" />}
-                    <Label className="text-base cursor-pointer">{label}</Label>
+        <Controller control={control} name={name} render={({ field }) => {
+            const selectedOption = options.find(o => o.value === field.value)
+            const isGood = selectedOption?.isGood ?? false
+            return (
+                <div className={`flex items-center justify-between p-3 rounded-lg border ${isGood ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className="flex items-center gap-3">
+                        {isGood
+                            ? <CheckCircle className="text-green-600 h-5 w-5" />
+                            : <XCircle className="text-red-600 h-5 w-5" />}
+                        <Label className="text-base font-semibold">{label}</Label>
+                    </div>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <SelectTrigger className="w-[140px] bg-white"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            {options.map(o => (
+                                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
-                <Switch checked={field.value} onCheckedChange={field.onChange} />
-            </div>
-        )} />
+            )
+        }} />
     )
 }

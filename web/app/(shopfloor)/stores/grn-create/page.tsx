@@ -159,10 +159,26 @@ function CreateGRNContent() {
                             <span className="text-slate-500 block">Vendor</span>
                             <span className="font-semibold">{gateEntry.vendors?.name}</span>
                         </div>
-                        <div>
+                        <div className="col-span-2">
                             <span className="text-slate-500 block">Challan No</span>
                             <span className="font-semibold">{gateEntry.challan_no}</span>
                         </div>
+                    </div>
+
+                    {/* Container Math Helper */}
+                    <div className="bg-blue-50/50 border border-blue-100 p-4 rounded-lg mb-6 flex items-center justify-between gap-4">
+                        <div>
+                            <p className="text-sm text-slate-500">Total Received Net Weight</p>
+                            <p className="font-bold text-lg text-blue-900">{gateEntry.net_weight || 0} kg</p>
+                        </div>
+                        {form.watch('unit_weight') > 0 && gateEntry.net_weight > 0 && (
+                            <div className="text-right">
+                                <p className="text-sm text-slate-500">Containers Needed (Approx)</p>
+                                <p className="font-bold text-lg text-blue-900">
+                                    {Math.ceil(gateEntry.net_weight / form.watch('unit_weight'))} <span className="text-sm font-normal">containers</span>
+                                </p>
+                            </div>
+                        )}
                     </div>
 
                     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
