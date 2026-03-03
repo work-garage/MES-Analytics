@@ -1,2 +1,2 @@
-.agent
-.agent/rules
+.agent/
+.agent/**
