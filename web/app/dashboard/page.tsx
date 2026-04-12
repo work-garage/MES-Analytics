@@ -64,9 +64,9 @@ export default function MainDashboard() {
                         <div className="h-8 w-px bg-gray-200"></div>
                         <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1.5 rounded-full transition-colors">
                             <div className="w-7 h-7 rounded-full bg-gray-800 text-white flex items-center justify-center text-xs font-medium">
-                                RK
+                                A
                             </div>
-                            <span className="text-sm font-medium text-gray-700 hidden sm:inline">Ritesh</span>
+                            <span className="text-sm font-medium text-gray-700 hidden sm:inline">Admin</span>
                         </div>
                     </div>
                 </div>
@@ -256,7 +256,7 @@ export default function MainDashboard() {
                             </div>
                             
                             <div className="space-y-3 mt-auto">
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-3 gap-3">
                                     <Link href="/masters/machines">
                                         <button className="w-full flex flex-col items-center justify-center gap-2 px-4 py-4 border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-800 font-medium transition-all duration-200">
                                             <Database className="h-5 w-5 text-gray-600" />
@@ -267,6 +267,12 @@ export default function MainDashboard() {
                                         <button className="w-full flex flex-col items-center justify-center gap-2 px-4 py-4 border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-800 font-medium transition-all duration-200">
                                             <Package className="h-5 w-5 text-gray-600" />
                                             <span className="text-sm">Materials</span>
+                                        </button>
+                                    </Link>
+                                    <Link href="/masters/vendors">
+                                        <button className="w-full flex flex-col items-center justify-center gap-2 px-4 py-4 border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-800 font-medium transition-all duration-200">
+                                            <Truck className="h-5 w-5 text-gray-600" />
+                                            <span className="text-sm">Vendors</span>
                                         </button>
                                     </Link>
                                 </div>
@@ -283,7 +289,7 @@ export default function MainDashboard() {
 
                 {/* Optional subtle footer / status */}
                 <div className="mt-16 pt-6 border-t border-gray-100 text-center text-xs text-gray-400">
-                    <span>© 2025 FactoryOS — All systems operational • Real‑time data sync active</span>
+                    <span>© 2025 NarayanaMES — All systems operational • Real‑time data sync active</span>
                 </div>
             </main>
         </div>

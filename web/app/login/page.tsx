@@ -9,6 +9,29 @@ import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
 import { Loader2, Factory, ShieldCheck, ArrowRight, Activity } from 'lucide-react'
 
+async function ensureUserProfile(
+    supabase: ReturnType<typeof createClient>,
+    user: { id: string; email?: string | null }
+) {
+    const { data: existing, error: checkError } = await supabase
+        .from('user_profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle()
+
+    if (checkError) throw checkError
+    if (existing) return
+
+    const { error: insertError } = await supabase.from('user_profiles').insert({
+        id: user.id,
+        email: user.email ?? null,
+        full_name: user.email?.split('@')[0] ?? 'User',
+        role: 'operator',
+    })
+
+    if (insertError) throw insertError
+}
+
 export default function LoginPage() {
     const router = useRouter()
     const [email, setEmail] = useState('')
@@ -34,6 +57,10 @@ export default function LoginPage() {
                     toast.error('Login Failed', { description: error.message })
                 }
             } else {
+                const { data: authUser } = await supabase.auth.getUser()
+                if (authUser.user) {
+                    await ensureUserProfile(supabase, authUser.user)
+                }
                 toast.success('Login Successful')
                 router.refresh()
                 router.push('/dashboard')
@@ -56,6 +83,9 @@ export default function LoginPage() {
             if (error) {
                 toast.error('Sign Up Failed', { description: error.message })
             } else {
+                if (data.user) {
+                    await ensureUserProfile(supabase, data.user)
+                }
                 if (data.user && !data.session) {
                     toast.success('Sign Up Successful!', { description: "Please check your email to confirm your account." })
                 } else {
@@ -83,7 +113,7 @@ export default function LoginPage() {
                     <div className="p-2 bg-blue-600 rounded-lg shadow-inner">
                         <Factory className="h-6 w-6 text-white" />
                     </div>
-                    <span className="font-bold text-2xl tracking-tight">Nexus<span className="text-blue-500">MES</span></span>
+                    <span className="font-bold text-2xl tracking-tight">Narayana<span className="text-blue-500">MES</span></span>
                 </div>
 
                 <div className="relative z-10 space-y-8 max-w-lg">
@@ -108,7 +138,7 @@ export default function LoginPage() {
                 </div>
 
                 <div className="relative z-10 text-sm text-zinc-500 font-medium">
-                    © {new Date().getFullYear()} Nexus Enterprise Software. All rights reserved.
+                    © {new Date().getFullYear()} Narayana Enterprise Software. All rights reserved.
                 </div>
             </div>
 
@@ -120,7 +150,7 @@ export default function LoginPage() {
                         <div className="p-1.5 bg-blue-600 rounded-md">
                             <Factory className="h-5 w-5 text-white" />
                         </div>
-                        <span className="font-bold text-xl tracking-tight">NexusMES</span>
+                        <span className="font-bold text-xl tracking-tight">NarayanaMES</span>
                     </div>
 
                     <div className="space-y-2">

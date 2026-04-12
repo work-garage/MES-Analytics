@@ -22,8 +22,8 @@ export default function DispatchPage() {
         queryFn: async () => {
             const { data, error } = await supabase
                 .from('fg_batches')
-                .select('id, batch_no, sku_code, quantity_units')
-                .gt('quantity_units', 0)
+                .select('id, fg_batch_no, sku_id, good_qty, produced_qty')
+                .gt('good_qty', 0)
 
             if (error) throw error
             return data || []
@@ -81,7 +81,7 @@ export default function DispatchPage() {
                                         <SelectContent>
                                             {batches?.map((b: any) => (
                                                 <SelectItem key={b.id} value={b.id}>
-                                                    {b.batch_no} ({b.sku_code}) - Avail: {b.quantity_units}
+                                                    {b.fg_batch_no} ({(b.sku_id ?? '').slice(0, 8)}) - Avail: {b.good_qty ?? b.produced_qty ?? 0}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>

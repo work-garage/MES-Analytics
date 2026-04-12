@@ -58,8 +58,24 @@ export const useAuth = create<AuthState>((set) => ({
             if (profile) {
                 set({ user: session.user, profile: profile as UserProfile, isLoading: false })
             } else {
-                // Fallback if profile missing (should not happen in prod)
-                set({ user: session.user, profile: null, isLoading: false })
+                const fallbackProfile = {
+                    id: session.user.id,
+                    email: session.user.email ?? null,
+                    full_name: session.user.email?.split('@')[0] ?? 'User',
+                    role: 'operator',
+                    plant_id: null,
+                }
+
+                const { error: insertError } = await supabase
+                    .from('user_profiles')
+                    .insert(fallbackProfile)
+
+                if (insertError) {
+                    set({ user: session.user, profile: null, isLoading: false })
+                    return
+                }
+
+                set({ user: session.user, profile: fallbackProfile as UserProfile, isLoading: false })
             }
 
         } catch (error) {

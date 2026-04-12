@@ -23,23 +23,52 @@ export default function CreateGRNPage() {
     )
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isUuid(value: string | null): value is string {
+    return !!value && UUID_RE.test(value)
+}
+
 function CreateGRNContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
-    const gateEntryId = searchParams.get('entry_id')
+    const rawGateEntryId = searchParams.get('entry_id')
+    const gateEntryId = isUuid(rawGateEntryId) ? rawGateEntryId : null
     const { user } = useAuth()
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [pendingEntries, setPendingEntries] = useState<any[]>([])
+    const [existingGrnNo, setExistingGrnNo] = useState<string | null>(null)
     const supabase = createClient()
+
+    useEffect(() => {
+        if (rawGateEntryId && !gateEntryId) {
+            toast.error('Invalid GRN link. Please choose an item from pending list.')
+            router.replace('/stores/grn-create')
+        }
+    }, [rawGateEntryId, gateEntryId, router])
 
     // Fetch Gate Entry OR Pending List
     const { data: gateEntry, isLoading } = useQuery({
         queryKey: ['gate-entry', gateEntryId],
         queryFn: async () => {
             if (gateEntryId) {
-                const { data } = await supabase.from('gate_entries').select('*, vendors(name), materials(name)').eq('id', gateEntryId).single()
+                const { data, error } = await supabase
+                    .from('gate_entries')
+                    .select('*, vendors(name), materials(name)')
+                    .eq('id', gateEntryId)
+                    .single()
+                if (error) throw error
+
+                const { data: existing } = await supabase
+                    .from('grns')
+                    .select('grn_no')
+                    .eq('gate_entry_id', gateEntryId)
+                    .maybeSingle()
+
+                setExistingGrnNo(existing?.grn_no ?? null)
                 return data
             } else {
+                setExistingGrnNo(null)
                 return null
             }
         },
@@ -50,12 +79,38 @@ function CreateGRNContent() {
     useEffect(() => {
         if (!gateEntryId) {
             const fetchPending = async () => {
-                const { data } = await supabase
+                const { data: pending, error: pendingError } = await supabase
                     .from('gate_entries')
                     .select('*, vendors(name), materials(name)')
-                    .eq('status', 'QA_OK')
+                    .in('status', ['QA_OK', 'QA_ACCEPTED'])
                     .order('updated_at', { ascending: true })
-                setPendingEntries(data || [])
+
+                if (pendingError) {
+                    toast.error('Failed to load pending entries', { description: pendingError.message })
+                    setPendingEntries([])
+                    return
+                }
+
+                const pendingRows = pending || []
+                if (pendingRows.length === 0) {
+                    setPendingEntries([])
+                    return
+                }
+
+                const ids = pendingRows.map((row: any) => row.id)
+                const { data: existingGrns, error: grnError } = await supabase
+                    .from('grns')
+                    .select('gate_entry_id')
+                    .in('gate_entry_id', ids)
+
+                if (grnError) {
+                    toast.error('Failed to validate existing GRNs', { description: grnError.message })
+                    setPendingEntries(pendingRows)
+                    return
+                }
+
+                const createdGateEntries = new Set((existingGrns || []).map((g: any) => g.gate_entry_id))
+                setPendingEntries(pendingRows.filter((row: any) => !createdGateEntries.has(row.id)))
             }
             fetchPending()
         }
@@ -73,6 +128,19 @@ function CreateGRNContent() {
     })
 
     const onSubmit = async (values: any) => {
+        if (!gateEntryId) {
+            toast.error('Invalid gate entry ID. Re-open GRN from pending list.')
+            return
+        }
+        if (!user?.id) {
+            toast.error('User session not ready. Please sign in again.')
+            return
+        }
+        if (existingGrnNo) {
+            toast.error(`GRN already created for this entry: ${existingGrnNo}`)
+            return
+        }
+
         setIsSubmitting(true)
         try {
             // Upload Photo
@@ -89,11 +157,12 @@ function CreateGRNContent() {
                 p_container_count: Number(values.container_count),
                 p_unit_weight: Number(values.unit_weight),
                 p_storage_location: values.storage_location,
-                p_manager_id: user?.id
+                p_manager_id: user.id
             })
 
             if (error) throw error
             toast.success("GRN Created Successfully")
+            setExistingGrnNo(data?.grn_no ?? 'CREATED')
             router.push('/stores/inventory')
 
         } catch (error: any) {
@@ -110,7 +179,7 @@ function CreateGRNContent() {
             <div className="max-w-4xl mx-auto py-6">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Pending GRN Finalization (QA Passed)</CardTitle>
+                        <CardTitle>Pending GRN Finalization (QA Accepted)</CardTitle>
                     </CardHeader>
                     <CardContent>
                         {pendingEntries.length === 0 ? (
@@ -125,7 +194,7 @@ function CreateGRNContent() {
                                             <div className="text-sm text-slate-500">{entry.vendors?.name} - {entry.vehicle_number}</div>
                                         </div>
                                         <div className="text-right">
-                                            <div className="font-mono text-xs bg-green-100 text-green-800 px-2 py-1 rounded mb-1">QA PASSED</div>
+                                            <div className="font-mono text-xs bg-green-100 text-green-800 px-2 py-1 rounded mb-1">QA ACCEPTED</div>
                                             <Button size="sm" variant="outline">Create GRN</Button>
                                         </div>
                                     </div>
@@ -182,6 +251,12 @@ function CreateGRNContent() {
                     </div>
 
                     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                        {existingGrnNo && (
+                            <div className="p-3 text-sm bg-amber-50 border border-amber-200 rounded text-amber-800">
+                                GRN already exists for this gate entry: <strong>{existingGrnNo}</strong>. Duplicate GRN creation is blocked.
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label>Container Type</Label>
@@ -235,7 +310,7 @@ function CreateGRNContent() {
                             )}
                         />
 
-                        <Button type="submit" className="w-full" disabled={isSubmitting}>
+                        <Button type="submit" className="w-full" disabled={isSubmitting || !!existingGrnNo}>
                             {isSubmitting ? <Loader2 className="animate-spin" /> : "Generate GRN"}
                         </Button>
                     </form>

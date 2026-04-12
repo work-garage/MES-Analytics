@@ -20,13 +20,24 @@ export default function VendorsPage() {
     const [editingId, setEditingId] = useState<string | null>(null)
     const [search, setSearch] = useState('')
 
-    const { register, handleSubmit, reset, setValue } = useForm()
+    const { register, handleSubmit, reset, setValue } = useForm({
+        defaultValues: {
+            vendor_code: '',
+            name: '',
+            contact_person: '',
+            email: '',
+            phone: '',
+        }
+    })
 
     const { data: vendors, isLoading } = useQuery({
         queryKey: ['vendors', search],
         queryFn: async () => {
-            let query = supabase.from('vendors').select('*').order('name')
-            if (search) query = query.ilike('name', `%${search}%`)
+            let query = supabase
+                .from('vendors')
+                .select('id, vendor_code, name, contact')
+                .order('name')
+            if (search) query = query.or(`name.ilike.%${search}%,vendor_code.ilike.%${search}%`)
             const { data } = await query
             return data || []
         }
@@ -34,11 +45,21 @@ export default function VendorsPage() {
 
     const mutation = useMutation({
         mutationFn: async (values: any) => {
+            const payload = {
+                vendor_code: values.vendor_code,
+                name: values.name,
+                contact: {
+                    person: values.contact_person || null,
+                    email: values.email || null,
+                    phone: values.phone || null,
+                }
+            }
+
             if (editingId) {
-                const { error } = await supabase.from('vendors').update(values).eq('id', editingId)
+                const { error } = await supabase.from('vendors').update(payload).eq('id', editingId)
                 if (error) throw error
             } else {
-                const { error } = await supabase.from('vendors').insert(values)
+                const { error } = await supabase.from('vendors').insert(payload)
                 if (error) throw error
             }
         },
@@ -51,12 +72,13 @@ export default function VendorsPage() {
     })
 
     const openEdit = (item: any) => {
+        const contact = (item.contact && typeof item.contact === 'object') ? item.contact : {}
         setEditingId(item.id)
-        setValue('code', item.code)
+        setValue('vendor_code', item.vendor_code)
         setValue('name', item.name)
-        setValue('contact_person', item.contact_person)
-        setValue('email', item.email)
-        setValue('phone', item.phone)
+        setValue('contact_person', (contact.person as string) ?? '')
+        setValue('email', (contact.email as string) ?? '')
+        setValue('phone', (contact.phone as string) ?? '')
         setIsOpen(true)
     }
 
@@ -80,7 +102,7 @@ export default function VendorsPage() {
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>Vendor Code</Label>
-                                    <Input {...register('code', { required: true })} placeholder="VEN-001" />
+                                    <Input {...register('vendor_code', { required: true })} placeholder="VEN-001" />
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Name</Label>
@@ -138,10 +160,10 @@ export default function VendorsPage() {
                                 <TableRow><TableCell colSpan={5} className="text-center py-4">Loading...</TableCell></TableRow>
                             ) : vendors?.map((v: any) => (
                                 <TableRow key={v.id}>
-                                    <TableCell className="font-mono text-xs">{v.code}</TableCell>
+                                    <TableCell className="font-mono text-xs">{v.vendor_code}</TableCell>
                                     <TableCell className="font-medium">{v.name}</TableCell>
-                                    <TableCell>{v.contact_person}</TableCell>
-                                    <TableCell>{v.email}</TableCell>
+                                    <TableCell>{v.contact?.person ?? '-'}</TableCell>
+                                    <TableCell>{v.contact?.email ?? '-'}</TableCell>
                                     <TableCell>
                                         <Button variant="ghost" size="icon" onClick={() => openEdit(v)}>
                                             <Edit className="h-4 w-4" />

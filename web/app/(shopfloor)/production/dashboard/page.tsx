@@ -180,7 +180,7 @@ export default function ProductionDashboard() {
                             </div>
                         </div>
                         <div className="h-[320px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
+                            <ResponsiveContainer width="100%" height={300} minWidth={0}>
                                 <AreaChart data={trendData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }}>
                                     <defs>
                                         <linearGradient id="colorOutput" x1="0" y1="0" x2="0" y2="1">
@@ -225,7 +225,7 @@ export default function ProductionDashboard() {
                             <p className="text-xs text-gray-500 mt-1">Downtime reasons by duration</p>
                         </div>
                         <div className="h-[320px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
+                            <ResponsiveContainer width="100%" height={300} minWidth={0}>
                                 <BarChart data={paretoData} layout="vertical" margin={{ top: 0, right: 20, left: 20, bottom: 0 }}>
                                     <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#F3F4F6" />
                                     <XAxis 

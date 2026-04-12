@@ -17,7 +17,7 @@ export default function AuditPage() {
     const [isSubmitting, setIsSubmitting] = useState(false)
 
     // Fetch Stock Snapshot
-    const { data: stock, isLoading } = useQuery({
+    const { data: stock, isLoading, refetch } = useQuery({
         queryKey: ['audit-stock'],
         queryFn: async () => {
             const { data } = await supabase.rpc('rpc_get_audit_snapshot')
@@ -53,9 +53,7 @@ export default function AuditPage() {
     const onSubmit = async (values: any) => {
         setIsSubmitting(true)
         try {
-            // Filter only rows where count varies OR always save all?
-            // "Daily reconciliation... records physical opening and closing".
-            // We'll save all verified rows.
+            const changedRows = values.rows.filter((r: any) => Number(r.physical_qty) !== Number(r.system_qty))
 
             // Map to RPC structure
             const adjustments = values.rows.map((r: any) => ({
@@ -65,13 +63,36 @@ export default function AuditPage() {
                 photo: r.photo // Path if uploaded, simplified here
             }))
 
+            const { data: userData } = await supabase.auth.getUser()
+            const userId = userData.user?.id
+            if (!userId) throw new Error('User session not available')
+
             const { error } = await supabase.rpc('rpc_submit_audit', {
                 p_adjustments: adjustments,
-                p_user_id: (await supabase.auth.getUser()).data.user?.id
+                p_user_id: userId
             })
 
             if (error) throw error
-            toast.success("Audit Logged Successfully")
+
+            // Persist reconciled quantities so refreshed inventory reflects physical count.
+            for (const row of changedRows) {
+                const physicalQty = Number(row.physical_qty)
+
+                const { error: grnError } = await supabase
+                    .from('grns')
+                    .update({ net_qty: physicalQty, updated_at: new Date().toISOString() })
+                    .eq('id', row.grn_id)
+                if (grnError) throw grnError
+
+                const { error: invError } = await supabase
+                    .from('main_inventory')
+                    .update({ available_qty: physicalQty, last_updated: new Date().toISOString() })
+                    .eq('grn_id', row.grn_id)
+                if (invError) throw invError
+            }
+
+            await refetch()
+            toast.success(`Audit Logged Successfully${changedRows.length ? ` • Updated ${changedRows.length} qty rows` : ''}`)
 
         } catch (e: any) {
             toast.error("Error", { description: e.message })

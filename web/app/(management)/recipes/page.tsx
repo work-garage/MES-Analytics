@@ -24,7 +24,7 @@ export default function RecipeDashboardPage() {
                     id, name, sku, version, is_active, created_at,
                     recipe_items (
                         id, qty_per_batch, tolerance_pct,
-                        materials ( name, code )
+                        materials ( name, material_code )
                     )
                 `)
                 .order('created_at', { ascending: false })

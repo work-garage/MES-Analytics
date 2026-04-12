@@ -62,7 +62,7 @@ function getMaterialCode(item: any): string {
     const m = Array.isArray(item.gate_entries?.materials)
         ? item.gate_entries?.materials[0]
         : item.gate_entries?.materials
-    return m?.code ?? ''
+    return m?.material_code ?? ''
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ function InventoryContent() {
                 .from('grns')
                 .select(`
                     id, grn_no, net_qty, itc_expiry_date, storage_location, created_at,
-                    gate_entries ( materials (name, code) ),
+                    gate_entries ( materials (name, material_code) ),
                     container_inventory(units, container_type),
                     reservations(qty, status)
                 `)

@@ -30,6 +30,11 @@ export default function QAPage() {
 // Note: 'INSPECTED_OK' is set by the vehicle inspection RPC on PASS
 const PENDING_STATUSES = ['INSPECTED_OK', 'QA_HOLD', 'QA_RETEST']
 const FINAL_REJECT_STATUSES = ['QA_REJECTED']
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isUuid(value: string | null): value is string {
+    return !!value && UUID_RE.test(value)
+}
 
 function getStatusBadge(status: string) {
     if (status === 'QA_HOLD')
@@ -44,7 +49,8 @@ function getStatusBadge(status: string) {
 function QAPageContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
-    const gateEntryId = searchParams.get('id')
+    const rawGateEntryId = searchParams.get('id')
+    const gateEntryId = isUuid(rawGateEntryId) ? rawGateEntryId : null
     const { user } = useAuth()
 
     const [autoHoldReason, setAutoHoldReason] = useState<string | null>(null)
@@ -109,6 +115,13 @@ function QAPageContent() {
     const foreignMatterValue = watch('foreign_matter')
 
     useEffect(() => {
+        if (rawGateEntryId && !gateEntryId) {
+            toast.error('Invalid QA link. Please select an item from pending list.')
+            router.replace('/qa')
+        }
+    }, [rawGateEntryId, gateEntryId, router])
+
+    useEffect(() => {
         const fetchEntries = async () => {
             setIsLoading(true)
             if (gateEntryId) {
@@ -156,6 +169,7 @@ function QAPageContent() {
 
     // Direct gate_entries status update — safe, no check-constraint issues
     const updateGateStatus = async (newStatus: string) => {
+        if (!gateEntryId) throw new Error('Invalid gate entry ID')
         const { error } = await supabase
             .from('gate_entries')
             .update({ status: newStatus, updated_at: new Date().toISOString() })
@@ -164,6 +178,15 @@ function QAPageContent() {
     }
 
     const handleAccept = handleSubmit(async (values: any) => {
+        if (!gateEntryId) {
+            toast.error('Invalid gate entry ID. Re-open QA from pending list.')
+            return
+        }
+        if (!user?.id) {
+            toast.error('User session not ready. Please sign in again.')
+            return
+        }
+
         if (autoHoldReason) return
 
         const failedChecks = []
@@ -219,7 +242,7 @@ function QAPageContent() {
             const { error } = await supabase.rpc('rpc_submit_qa_inspection', {
                 p_gate_entry_id: gateEntryId,
                 p_result: 'ACCEPT',
-                p_inspector_id: user?.id,
+                p_inspector_id: user.id,
                 p_auto_hold: false,
                 p_lab_photos: [],
                 // Include all missing physical check parameters so DB row is created

@@ -28,6 +28,11 @@ export default function VehicleInspectionPage() {
 const PENDING_STATUSES = ['WEIGHED', 'WEIGHED_DISCREPANCY', 'VEHICLE_HOLD', 'VEHICLE_RETEST']
 // Entries that are finally rejected
 const FINAL_REJECT_STATUSES = ['VEHICLE_REJECTED']
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isUuid(value: string | null): value is string {
+    return !!value && UUID_RE.test(value)
+}
 
 function getStatusBadge(status: string) {
     if (status === 'VEHICLE_HOLD')
@@ -42,7 +47,8 @@ function getStatusBadge(status: string) {
 function VehicleInspectionContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
-    const gateEntryId = searchParams.get('id')
+    const rawGateEntryId = searchParams.get('id')
+    const gateEntryId = isUuid(rawGateEntryId) ? rawGateEntryId : null
     const { user } = useAuth()
 
     const [gateEntry, setGateEntry] = useState<any>(null)
@@ -71,6 +77,13 @@ function VehicleInspectionContent() {
             remarks: ''
         }
     })
+
+    useEffect(() => {
+        if (rawGateEntryId && !gateEntryId) {
+            toast.error('Invalid inspection link. Please select a vehicle from the list.')
+            router.replace('/vehicle-inspection')
+        }
+    }, [rawGateEntryId, gateEntryId, router])
 
     useEffect(() => {
         const fetchEntries = async () => {
@@ -108,6 +121,7 @@ function VehicleInspectionContent() {
 
     // Direct gate_entries update — bypasses RPC to avoid check constraint issues
     const updateGateStatus = async (newStatus: string) => {
+        if (!gateEntryId) throw new Error('Invalid gate entry ID')
         const { error } = await supabase
             .from('gate_entries')
             .update({ status: newStatus, updated_at: new Date().toISOString() })
@@ -116,6 +130,15 @@ function VehicleInspectionContent() {
     }
 
     const handleAccept = async () => {
+        if (!gateEntryId) {
+            toast.error('Invalid gate entry ID. Re-open inspection from pending list.')
+            return
+        }
+        if (!user?.id) {
+            toast.error('User session not ready. Please sign in again.')
+            return
+        }
+
         const values = form.getValues()
         // Check for positive combinations
         const checksPassed =
@@ -142,7 +165,7 @@ function VehicleInspectionContent() {
                 p_checklist: values,
                 p_result: 'PASS',
                 p_remarks: values.remarks,
-                p_inspector_id: user?.id,
+                p_inspector_id: user.id,
                 p_hazardous_history_ok: values.hazardous_material_history === 'No'
             })
             if (error) {

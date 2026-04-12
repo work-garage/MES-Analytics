@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Wrench, CheckCircle, Clock, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
+import { getDowntimeReasonLabel } from '@/lib/constants/maintenance'
 
 export default function MaintenancePage() {
     const supabase = createClient()
@@ -121,7 +122,7 @@ export default function MaintenancePage() {
                                         <TableCell className="font-medium">
                                             {t.machines?.name} <span className="text-xs text-slate-500">({t.machines?.code})</span>
                                         </TableCell>
-                                        <TableCell>{t.reason_code}</TableCell>
+                                        <TableCell>{getDowntimeReasonLabel(t.reason_code)}</TableCell>
                                         <TableCell className="text-xs">{new Date(t.created_at).toLocaleString()}</TableCell>
                                         <TableCell className="font-mono">
                                             {typeof duration === 'number' ? `${duration} m` : <span className="flex items-center text-orange-600"><Clock className="w-3 h-3 mr-1" /> Active</span>}

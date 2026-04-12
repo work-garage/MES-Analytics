@@ -34,10 +34,18 @@ export default function WeighbridgePage() {
     )
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isUuid(value: string | null): value is string {
+    return !!value && UUID_RE.test(value)
+}
+
 function WeighbridgeContent() {
     const router = useRouter()
     const searchParams = useSearchParams()
-    const entryId = searchParams.get('entry_id')
+    const rawEntryId = searchParams.get('entry_id')
+    const entryId = isUuid(rawEntryId) ? rawEntryId : null
+    const { user } = useAuth()
 
     const [gateEntry, setGateEntry] = useState<any>(null)
     const [pendingEntries, setPendingEntries] = useState<any[]>([])
@@ -66,6 +74,13 @@ function WeighbridgeContent() {
 
     const gross = form.watch('gross_weight')
     const tare = form.watch('tare_weight')
+
+    useEffect(() => {
+        if (rawEntryId && !entryId) {
+            toast.error('Invalid weighbridge link. Please select a vehicle from queue.')
+            router.replace('/weighbridge')
+        }
+    }, [rawEntryId, entryId, router])
 
     // Fetch Gate Entry OR List Pending
     useEffect(() => {
@@ -110,6 +125,15 @@ function WeighbridgeContent() {
     }
 
     const processSubmission = async (values: any, supervisorId: string | null = null) => {
+        if (!entryId) {
+            toast.error('Invalid gate entry ID. Please reopen from queue.')
+            return
+        }
+        if (!supervisorId && !user?.id) {
+            toast.error('User session not ready. Please sign in again.')
+            return
+        }
+
         try {
             setIsSubmitting(true)
 
@@ -127,7 +151,7 @@ function WeighbridgeContent() {
                 p_net_weight: values.net_weight,
                 p_truck_photo: photoPath,
                 p_scale_proof: null,
-                p_supervisor_id: supervisorId
+                p_supervisor_id: supervisorId ?? user!.id
             })
 
             if (error) throw error

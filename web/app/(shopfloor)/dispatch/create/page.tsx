@@ -66,8 +66,8 @@ function DispatchContent() {
         queryKey: ['fg-batches-avail'],
         queryFn: async () => {
             const { data } = await supabase.from('fg_batches')
-                .select('id, batch_no, sku_code, quantity_units')
-                .gt('quantity_units', 0)
+                .select('id, fg_batch_no, sku_id, good_qty, produced_qty')
+                .gt('good_qty', 0)
             return data || []
         }
     })
@@ -251,9 +251,9 @@ function DispatchContent() {
                                                                     <SelectContent>
                                                                         {batches?.map((b: any) => (
                                                                             <SelectItem key={b.id} value={b.id} className="font-medium">
-                                                                                <span className="font-mono text-gray-500 mr-2">{b.batch_no}</span> 
-                                                                                {b.sku_code} 
-                                                                                <span className="ml-2 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">{b.quantity_units} Avl</span>
+                                                                                <span className="font-mono text-gray-500 mr-2">{b.fg_batch_no}</span>
+                                                                                {(b.sku_id ?? '').slice(0, 8)}
+                                                                                <span className="ml-2 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">{b.good_qty ?? b.produced_qty ?? 0} Avl</span>
                                                                             </SelectItem>
                                                                         ))}
                                                                     </SelectContent>
