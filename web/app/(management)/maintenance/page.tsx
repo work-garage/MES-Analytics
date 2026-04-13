@@ -16,6 +16,26 @@ import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
 import { getDowntimeReasonLabel } from '@/lib/constants/maintenance'
 
+function parseDowntimeMetrics(remarks: string | null | undefined) {
+    if (!remarks) return null
+    const marker = '__METRICS__'
+    const line = remarks.split('\n').find((entry) => entry.startsWith(marker))
+    if (!line) return null
+    try {
+        return JSON.parse(line.slice(marker.length))
+    } catch {
+        return null
+    }
+}
+
+function getDurationMins(startTs: string | null | undefined, endTs: string | null | undefined) {
+    if (!startTs) return null
+    const start = new Date(startTs).getTime()
+    const end = endTs ? new Date(endTs).getTime() : Date.now()
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return null
+    return Math.max(Math.round((end - start) / 60000), 0)
+}
+
 export default function MaintenancePage() {
     const supabase = createClient()
     const queryClient = useQueryClient()
@@ -98,6 +118,7 @@ export default function MaintenancePage() {
                                 <TableHead>Status</TableHead>
                                 <TableHead>Machine</TableHead>
                                 <TableHead>Reason</TableHead>
+                                <TableHead>Estimated Loss</TableHead>
                                 <TableHead>Reported At</TableHead>
                                 <TableHead>Duration</TableHead>
                                 <TableHead className="w-[150px]">Actions</TableHead>
@@ -105,12 +126,11 @@ export default function MaintenancePage() {
                         </TableHeader>
                         <TableBody>
                             {isLoading ? (
-                                <TableRow><TableCell colSpan={6} className="text-center py-4">Loading...</TableCell></TableRow>
+                                <TableRow><TableCell colSpan={7} className="text-center py-4">Loading...</TableCell></TableRow>
                             ) : tickets?.map((t: any) => {
                                 const isClosed = t.status === 'CLOSED'
-                                const duration = isClosed
-                                    ? Math.round((new Date(t.resolution_time).getTime() - new Date(t.created_at).getTime()) / 60000)
-                                    : 'Active'
+                                const duration = getDurationMins(t.start_ts, isClosed ? t.end_ts : null)
+                                const metrics = parseDowntimeMetrics(t.remarks)
 
                                 return (
                                     <TableRow key={t.id}>
@@ -123,9 +143,15 @@ export default function MaintenancePage() {
                                             {t.machines?.name} <span className="text-xs text-slate-500">({t.machines?.code})</span>
                                         </TableCell>
                                         <TableCell>{getDowntimeReasonLabel(t.reason_code)}</TableCell>
+                                        <TableCell className="text-xs">
+                                            <div className="text-slate-700">{metrics?.estimated_wastage_kg ?? 0} kg waste</div>
+                                            <div className="text-slate-500">{metrics?.estimated_output_loss_kg ?? 0} kg loss</div>
+                                        </TableCell>
                                         <TableCell className="text-xs">{new Date(t.created_at).toLocaleString()}</TableCell>
                                         <TableCell className="font-mono">
-                                            {typeof duration === 'number' ? `${duration} m` : <span className="flex items-center text-orange-600"><Clock className="w-3 h-3 mr-1" /> Active</span>}
+                                            {typeof duration === 'number'
+                                                ? `${duration} m`
+                                                : <span className="flex items-center text-orange-600"><Clock className="w-3 h-3 mr-1" /> Active</span>}
                                         </TableCell>
                                         <TableCell>
                                             {!isClosed && (

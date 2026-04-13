@@ -191,8 +191,7 @@ export default function FGBatchPage() {
                         material_id,
                         available_qty,
                         lot_expiry,
-                        grns ( id, grn_no, net_qty, unit_weight, container_type, itc_expiry_date, status ),
-                        container_inventory ( units ),
+                        grns ( id, grn_no, net_qty, unit_weight, container_type, itc_expiry_date, status, container_inventory ( units ) ),
                         materials ( name, material_code )
                     `)
                     .in('material_id', materialIds)
@@ -214,7 +213,7 @@ export default function FGBatchPage() {
                         grn_net_qty: Number(r.grns?.net_qty || 0),
                         unit_weight: Number(r.grns?.unit_weight || 0),
                         container_type: r.grns?.container_type ?? 'units',
-                        container_units_available: Number(r.container_inventory?.[0]?.units || 0),
+                        container_units_available: Number(r.grns?.container_inventory?.[0]?.units || 0),
                         expiry: r.grns?.itc_expiry_date ?? r.lot_expiry ?? '',
                     }))
             }

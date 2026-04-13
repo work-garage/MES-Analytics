@@ -7,6 +7,7 @@ import { Loader2, LogOut, Package, ClipboardCheck, Truck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { BackButton } from '@/components/ui/back-button'
+import TopNotifications from '@/components/business/TopNotifications'
 
 export default function ShopfloorLayout({
     children,
@@ -55,6 +56,7 @@ export default function ShopfloorLayout({
 
 
                 <div className="flex items-center gap-4">
+                    <TopNotifications />
                     <div className="text-right hidden sm:block">
                         <p className="text-sm font-medium">{profile.full_name}</p>
                         <p className="text-xs text-slate-500 capitalize">{profile.role.replace('_', ' ')}</p>

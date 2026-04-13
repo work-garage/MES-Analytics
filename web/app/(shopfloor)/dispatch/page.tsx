@@ -13,6 +13,14 @@ import { useRouter } from 'next/navigation'
 import PhotoCapture from '@/components/business/PhotoCapture'
 import { Truck } from 'lucide-react'
 
+function generateDispatchNo() {
+    const now = new Date()
+    const date = now.toISOString().slice(0, 10).replace(/-/g, '')
+    const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+    const rand = Math.floor(Math.random() * 900 + 100)
+    return `DSP-${date}-${time}-${rand}`
+}
+
 export default function DispatchPage() {
     const router = useRouter()
     const supabase = createClient()
@@ -42,25 +50,56 @@ export default function DispatchPage() {
     })
 
     const handleDispatch = async (values: any) => {
-        // Upload Photo
-        // Call RPC rpc_dispatch_fg
+        try {
+            if (!values.selectedBatch) {
+                toast.error('Select an FG batch to dispatch.')
+                return
+            }
+            const qty = Number(values.dispatchQty)
+            if (qty <= 0) {
+                toast.error('Dispatch quantity must be greater than zero.')
+                return
+            }
 
-        const { error } = await supabase.rpc('rpc_dispatch_fg', {
-            p_fg_batch_id: values.selectedBatch,
-            p_quantity: values.dispatchQty,
-            p_destination: 'Mumbai Depot',
-            p_truck_no: values.truckNo,
-            p_transporter: 'VRL Logistics',
-            p_lr_no: values.lrNo,
-            p_driver_name: values.driverName,
-            p_photos: ['path/to/uploaded/photo.jpg'] // TODO: Real upload
-        })
+            const { data: batchRow, error: batchError } = await supabase
+                .from('fg_batches')
+                .select('id, good_qty, produced_qty')
+                .eq('id', values.selectedBatch)
+                .single()
+            if (batchError) throw batchError
 
-        if (error) {
-            toast.error("Dispatch Failed", { description: error.message })
-        } else {
+            const available = Number(batchRow.good_qty ?? batchRow.produced_qty ?? 0)
+            if (qty > available) {
+                toast.error(`Dispatch qty exceeds available stock (${available}).`)
+                return
+            }
+
+            const { error: updateError } = await supabase
+                .from('fg_batches')
+                .update({ good_qty: Math.max(available - qty, 0) })
+                .eq('id', values.selectedBatch)
+            if (updateError) throw updateError
+
+            const { error: insertError } = await supabase
+                .from('dispatches')
+                .insert({
+                    dispatch_no: generateDispatchNo(),
+                    fg_batch_id: values.selectedBatch,
+                    quantity: qty,
+                    destination: values.lrNo || 'Customer Dispatch',
+                    truck_no: values.truckNo,
+                    transporter: 'Internal',
+                    lr_no: values.lrNo || null,
+                    dispatch_datetime: new Date().toISOString(),
+                    driver_name: values.driverName || null,
+                    photos: null,
+                })
+            if (insertError) throw insertError
+
             toast.success("Dispatch Created")
             router.push('/dashboard')
+        } catch (error: any) {
+            toast.error("Dispatch Failed", { description: error.message })
         }
     }
 

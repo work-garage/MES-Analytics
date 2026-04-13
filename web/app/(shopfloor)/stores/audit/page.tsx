@@ -16,6 +16,41 @@ export default function AuditPage() {
     const supabase = createClient()
     const [isSubmitting, setIsSubmitting] = useState(false)
 
+    const syncMainInventoryForGrn = async (grnId: string, targetQty: number) => {
+        const { data: invRows, error: invFetchError } = await supabase
+            .from('main_inventory')
+            .select('id, available_qty')
+            .eq('grn_id', grnId)
+
+        if (invFetchError) throw invFetchError
+        if (!invRows || invRows.length === 0) return
+
+        const currentTotal = invRows.reduce((sum: number, row: any) => sum + Number(row.available_qty || 0), 0)
+        let allocatedSoFar = 0
+
+        for (let i = 0; i < invRows.length; i++) {
+            const row = invRows[i]
+            const isLast = i === invRows.length - 1
+            let nextQty = 0
+
+            if (isLast) {
+                nextQty = Math.max(targetQty - allocatedSoFar, 0)
+            } else if (currentTotal > 0) {
+                nextQty = Number(((Number(row.available_qty || 0) / currentTotal) * targetQty).toFixed(3))
+                allocatedSoFar += nextQty
+            } else {
+                nextQty = Number((targetQty / invRows.length).toFixed(3))
+                allocatedSoFar += nextQty
+            }
+
+            const { error: invUpdateError } = await supabase
+                .from('main_inventory')
+                .update({ available_qty: nextQty, last_updated: new Date().toISOString() })
+                .eq('id', row.id)
+            if (invUpdateError) throw invUpdateError
+        }
+    }
+
     // Fetch Stock Snapshot
     const { data: stock, isLoading, refetch } = useQuery({
         queryKey: ['audit-stock'],
@@ -55,6 +90,11 @@ export default function AuditPage() {
         try {
             const changedRows = values.rows.filter((r: any) => Number(r.physical_qty) !== Number(r.system_qty))
 
+            if (changedRows.length === 0) {
+                toast.success('No variances found. Audit log saved.')
+                return
+            }
+
             // Map to RPC structure
             const adjustments = values.rows.map((r: any) => ({
                 grn_id: r.grn_id,
@@ -74,7 +114,7 @@ export default function AuditPage() {
 
             if (error) throw error
 
-            // Persist reconciled quantities so refreshed inventory reflects physical count.
+            // Persist reconciled quantities so rpc_get_audit_snapshot reflects physical count.
             for (const row of changedRows) {
                 const physicalQty = Number(row.physical_qty)
 
@@ -84,11 +124,7 @@ export default function AuditPage() {
                     .eq('id', row.grn_id)
                 if (grnError) throw grnError
 
-                const { error: invError } = await supabase
-                    .from('main_inventory')
-                    .update({ available_qty: physicalQty, last_updated: new Date().toISOString() })
-                    .eq('grn_id', row.grn_id)
-                if (invError) throw invError
+                await syncMainInventoryForGrn(row.grn_id, physicalQty)
             }
 
             await refetch()

@@ -39,6 +39,14 @@ const fadeUpItem = {
     show: { y: 0, opacity: 1, transition: { type: "tween", ease: "easeOut", duration: 0.3 } }
 } satisfies Variants
 
+function generateDispatchNo() {
+    const now = new Date()
+    const date = now.toISOString().slice(0, 10).replace(/-/g, '')
+    const time = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`
+    const rand = Math.floor(Math.random() * 900 + 100)
+    return `DSP-${date}-${time}-${rand}`
+}
+
 export default function DispatchPage() {
     return (
         <Suspense fallback={
@@ -106,6 +114,10 @@ function DispatchContent() {
             return toast.error("Manifest Error", { description: "Please add at least one valid batch to the manifest." })
         }
 
+        if (values.items.some((item: any) => !item.batch_id || Number(item.qty) <= 0)) {
+            return toast.error("Manifest Error", { description: "Each manifest row needs a batch and qty > 0." })
+        }
+
         setIsSubmitting(true)
         try {
             let photoPath = null
@@ -115,18 +127,49 @@ function DispatchContent() {
             }
 
             const { data: userData } = await supabase.auth.getUser()
+            const userId = userData.user?.id
+            if (!userId) throw new Error('User session not available')
 
-            const { error } = await supabase.rpc('rpc_create_dispatch', {
-                p_customer: values.customer,
-                p_truck: values.truck,
-                p_driver: values.driver,
-                p_driver_mobile: values.mobile,
-                p_items: values.items,
-                p_user_id: userData.user?.id,
-                p_photo: photoPath
-            })
+            const dispatchNo = generateDispatchNo()
 
-            if (error) throw error
+            for (const item of values.items) {
+                const qty = Number(item.qty)
+
+                const { data: batchRow, error: batchError } = await supabase
+                    .from('fg_batches')
+                    .select('id, good_qty, produced_qty')
+                    .eq('id', item.batch_id)
+                    .single()
+                if (batchError) throw batchError
+
+                const available = Number(batchRow.good_qty ?? batchRow.produced_qty ?? 0)
+                if (qty > available) {
+                    throw new Error(`Dispatch qty exceeds available FG stock for one manifest row (${available}).`)
+                }
+
+                const { error: batchUpdateError } = await supabase
+                    .from('fg_batches')
+                    .update({ good_qty: Math.max(available - qty, 0) })
+                    .eq('id', item.batch_id)
+                if (batchUpdateError) throw batchUpdateError
+
+                const { error: dispatchInsertError } = await supabase
+                    .from('dispatches')
+                    .insert({
+                        dispatch_no: dispatchNo,
+                        fg_batch_id: item.batch_id,
+                        quantity: qty,
+                        destination: values.customer,
+                        truck_no: values.truck,
+                        transporter: 'Internal',
+                        lr_no: null,
+                        dispatch_datetime: new Date().toISOString(),
+                        driver_name: values.driver,
+                        photos: photoPath ? [photoPath] : null,
+                    })
+                if (dispatchInsertError) throw dispatchInsertError
+            }
+
             toast.success("Dispatch Created Successfully")
             form.reset({
                 customer: '',
@@ -350,13 +393,13 @@ function DispatchContent() {
                                             <div className="flex justify-between items-start mb-3 border-b border-gray-100 pb-3">
                                                 <div>
                                                     <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider block mb-0.5">Vehicle</span>
-                                                    <span className="font-mono font-bold text-gray-900">{d.vehicle_no}</span>
+                                                    <span className="font-mono font-bold text-gray-900">{d.truck_no ?? '-'}</span>
                                                 </div>
                                                 <div className="text-right">
                                                     <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded-md ${
-                                                        d.status === 'COMPLETED' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                                                        d.dispatch_datetime ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'
                                                     }`}>
-                                                        {d.status}
+                                                        {d.dispatch_datetime ? 'DISPATCHED' : 'CREATED'}
                                                     </span>
                                                 </div>
                                             </div>
@@ -364,11 +407,11 @@ function DispatchContent() {
                                             <div className="space-y-1.5 mb-3">
                                                 <div className="flex justify-between text-sm">
                                                     <span className="text-gray-500">Destination</span>
-                                                    <span className="font-medium text-gray-900 truncate max-w-[150px]">{d.customer_name}</span>
+                                                    <span className="font-medium text-gray-900 truncate max-w-[150px]">{d.destination ?? '-'}</span>
                                                 </div>
                                                 <div className="flex justify-between text-sm">
                                                     <span className="text-gray-500">Driver</span>
-                                                    <span className="font-medium text-gray-900">{d.driver_name}</span>
+                                                    <span className="font-medium text-gray-900">{d.driver_name ?? '-'}</span>
                                                 </div>
                                             </div>
 

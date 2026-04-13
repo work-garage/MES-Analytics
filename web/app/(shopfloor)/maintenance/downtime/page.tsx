@@ -26,6 +26,9 @@ type DowntimeFormValues = {
     stage: string
     reason: string
     reason_other: string
+    estimated_duration_mins: number
+    estimated_wastage_kg: number
+    estimated_output_loss_kg: number
     remarks: string
     oven_shutdown: boolean
 }
@@ -47,7 +50,13 @@ async function createDowntimeWithFallback(
     const reasonSuffix = values.reason === 'OTHER' && values.reason_other.trim()
         ? `Other reason: ${values.reason_other.trim()}`
         : ''
-    const mergedRemarks = [reasonSuffix, values.remarks].filter(Boolean).join('\n').trim()
+    const metrics = {
+        estimated_duration_mins: Number(values.estimated_duration_mins || 0),
+        estimated_wastage_kg: Number(values.estimated_wastage_kg || 0),
+        estimated_output_loss_kg: Number(values.estimated_output_loss_kg || 0),
+    }
+    const metricsLine = `__METRICS__${JSON.stringify(metrics)}`
+    const mergedRemarks = [reasonSuffix, values.remarks, metricsLine].filter(Boolean).join('\n').trim()
 
     const rpcAttempt = await supabase.rpc('rpc_create_downtime_ticket', {
         p_machine_id: values.machine_id,
@@ -73,6 +82,7 @@ async function createDowntimeWithFallback(
         category: values.category,
         stage: values.stage,
         oven_shutdown: values.oven_shutdown,
+        affects_capacity: values.oven_shutdown,
         remarks: mergedRemarks,
     }
 
@@ -106,6 +116,9 @@ export default function DowntimePage() {
             stage: 'CUTTING',
             reason: 'NO_MATERIAL',
             reason_other: '',
+            estimated_duration_mins: 0,
+            estimated_wastage_kg: 0,
+            estimated_output_loss_kg: 0,
             remarks: '',
             oven_shutdown: false
         }
@@ -156,6 +169,9 @@ export default function DowntimePage() {
                 stage: 'CUTTING',
                 reason: 'NO_MATERIAL',
                 reason_other: '',
+                estimated_duration_mins: 0,
+                estimated_wastage_kg: 0,
+                estimated_output_loss_kg: 0,
                 remarks: '',
                 oven_shutdown: false,
             })
@@ -238,6 +254,35 @@ export default function DowntimePage() {
                                 />
                             </div>
                         )}
+
+                        <div className="grid grid-cols-3 gap-4">
+                            <div className="space-y-2">
+                                <Label>Estimated Downtime (mins)</Label>
+                                <Input
+                                    type="number"
+                                    min={0}
+                                    {...form.register('estimated_duration_mins', { valueAsNumber: true })}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Estimated Wastage (kg)</Label>
+                                <Input
+                                    type="number"
+                                    step="0.01"
+                                    min={0}
+                                    {...form.register('estimated_wastage_kg', { valueAsNumber: true })}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Estimated Output Loss (kg)</Label>
+                                <Input
+                                    type="number"
+                                    step="0.01"
+                                    min={0}
+                                    {...form.register('estimated_output_loss_kg', { valueAsNumber: true })}
+                                />
+                            </div>
+                        </div>
 
                         <div className="flex items-center space-x-2 border p-3 rounded bg-white">
                             <Switch id="oven-down" onCheckedChange={v => form.setValue('oven_shutdown', v)} />
