@@ -14,11 +14,9 @@ import {
     Activity, 
     Menu,
     ChevronRight,
-    Bell,
-    Search,
-    User,
     ShieldCheck
 } from "lucide-react"
+import TopNotifications from '@/components/business/TopNotifications'
 
 // --- Animation Variants (same structure, slightly smoother) ---
 const containerVariants = {
@@ -57,10 +55,7 @@ export default function MainDashboard() {
                         </div>
                     </div>
                     <div className="flex items-center gap-4">
-                        <button className="p-2 hover:bg-gray-100 rounded-full transition-colors relative">
-                            <Bell className="h-5 w-5 text-gray-600" />
-                            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white"></span>
-                        </button>
+                        <TopNotifications buttonClassName="hover:bg-gray-100" />
                         <div className="h-8 w-px bg-gray-200"></div>
                         <div className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1.5 rounded-full transition-colors">
                             <div className="w-7 h-7 rounded-full bg-gray-800 text-white flex items-center justify-center text-xs font-medium">

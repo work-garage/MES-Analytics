@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { createBrowserClient } from '@supabase/ssr'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -14,13 +15,29 @@ import { UserPlus, UserCog, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
 
+type UserFormValues = {
+    full_name: string
+    email: string
+    role: string
+    password?: string
+}
+
 export default function UsersPage() {
     const supabase = createClient()
     const queryClient = useQueryClient()
     const [isOpen, setIsOpen] = useState(false)
     const [editingId, setEditingId] = useState<string | null>(null)
 
-    const { register, handleSubmit, reset, setValue } = useForm()
+    const { register, handleSubmit, reset, setValue, watch } = useForm<UserFormValues>({
+        defaultValues: {
+            full_name: '',
+            email: '',
+            role: 'operator',
+            password: ''
+        }
+    })
+
+    const role = watch('role')
 
     const { data: users, isLoading } = useQuery({
         queryKey: ['user_profiles'],
@@ -31,23 +48,73 @@ export default function UsersPage() {
     })
 
     const mutation = useMutation({
-        mutationFn: async (values: any) => {
+        mutationFn: async (values: UserFormValues) => {
             if (editingId) {
-                const { error } = await supabase.from('user_profiles').update(values).eq('id', editingId)
+                const { error } = await supabase
+                    .from('user_profiles')
+                    .update({ full_name: values.full_name, role: values.role })
+                    .eq('id', editingId)
                 if (error) throw error
             } else {
-                // Creating a user usually involves Auth API. 
-                // Without Admin API access here, we can only insert into profile if the auth user exists.
-                // For demo, we assume we insert into profile directly or utilize a function.
-                // Let's assume we call an RPC `create_user_invite` that handles auth + profile.
-                const { error } = await supabase.rpc('create_user_invite', values)
-                if (error) throw error
+                const password = values.password?.trim() || ''
+                if (password.length < 8) {
+                    throw new Error('Password must be at least 8 characters long.')
+                }
+
+                const signupClient = createBrowserClient(
+                    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+                    {
+                        auth: {
+                            persistSession: false,
+                            autoRefreshToken: false,
+                            detectSessionInUrl: false
+                        }
+                    }
+                )
+
+                const email = values.email.trim().toLowerCase()
+                const { data: signUpData, error: signUpError } = await signupClient.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: {
+                            full_name: values.full_name,
+                            role: values.role
+                        }
+                    }
+                })
+
+                if (signUpError) throw signUpError
+
+                const createdUserId = signUpData.user?.id
+                if (!createdUserId) {
+                    throw new Error('User account could not be created. Check auth settings and retry.')
+                }
+
+                const { error: profileError } = await supabase.from('user_profiles').upsert(
+                    {
+                        id: createdUserId,
+                        email,
+                        full_name: values.full_name,
+                        role: values.role
+                    },
+                    { onConflict: 'id' }
+                )
+
+                if (profileError) throw profileError
             }
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['user_profiles'] })
             setIsOpen(false)
-            toast.success("User Saved")
+            reset({
+                full_name: '',
+                email: '',
+                role: 'operator',
+                password: ''
+            })
+            toast.success(editingId ? 'User updated' : 'User created')
         },
         onError: (err: any) => toast.error(err.message)
     })
@@ -56,13 +123,19 @@ export default function UsersPage() {
         setEditingId(item.id)
         setValue('full_name', item.full_name)
         setValue('email', item.email)
-        setValue('role', item.role)
+        setValue('role', item.role || 'operator')
+        setValue('password', '')
         setIsOpen(true)
     }
 
     const openNew = () => {
         setEditingId(null)
-        reset()
+        reset({
+            full_name: '',
+            email: '',
+            role: 'operator',
+            password: ''
+        })
         setIsOpen(true)
     }
 
@@ -75,7 +148,7 @@ export default function UsersPage() {
                         <Button onClick={openNew}><UserPlus className="mr-2 h-4 w-4" /> Add User</Button>
                     </DialogTrigger>
                     <DialogContent>
-                        <DialogHeader><DialogTitle>{editingId ? 'Edit' : 'Invite'} User</DialogTitle></DialogHeader>
+                        <DialogHeader><DialogTitle>{editingId ? 'Edit User' : 'Create User'}</DialogTitle></DialogHeader>
                         <form onSubmit={handleSubmit((data) => mutation.mutate(data))} className="space-y-4">
                             <div className="space-y-2">
                                 <Label>Full Name</Label>
@@ -87,7 +160,7 @@ export default function UsersPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label>Role</Label>
-                                <Select onValueChange={v => setValue('role', v)}>
+                                <Select value={role} onValueChange={v => setValue('role', v as UserFormValues['role'], { shouldValidate: true })}>
                                     <SelectTrigger><SelectValue placeholder="Select Role" /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="operator">Operator</SelectItem>
@@ -100,9 +173,18 @@ export default function UsersPage() {
                                     </SelectContent>
                                 </Select>
                             </div>
+
+                            {!editingId && (
+                                <div className="space-y-2">
+                                    <Label>Temporary Password</Label>
+                                    <Input type="password" {...register('password', { required: true, minLength: 8 })} />
+                                    <p className="text-xs text-slate-500">Minimum 8 characters. Share securely with the user.</p>
+                                </div>
+                            )}
+
                             <Button type="submit" className="w-full" disabled={mutation.isPending}>
                                 {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                {editingId ? 'Update Profile' : 'Send Invite'}
+                                {editingId ? 'Update Profile' : 'Create Account'}
                             </Button>
                         </form>
                     </DialogContent>

@@ -37,7 +37,14 @@ function CreateGRNContent() {
     const { user } = useAuth()
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [pendingEntries, setPendingEntries] = useState<any[]>([])
-    const [existingGrnNo, setExistingGrnNo] = useState<string | null>(null)
+    const [existingGrn, setExistingGrn] = useState<{
+        id: string
+        grn_no: string
+        status: string | null
+        net_qty: number | null
+        itc_expiry_date: string | null
+        created_at: string | null
+    } | null>(null)
     const supabase = createClient()
 
     useEffect(() => {
@@ -61,14 +68,14 @@ function CreateGRNContent() {
 
                 const { data: existing } = await supabase
                     .from('grns')
-                    .select('grn_no')
+                    .select('id, grn_no, status, net_qty, itc_expiry_date, created_at')
                     .eq('gate_entry_id', gateEntryId)
                     .maybeSingle()
 
-                setExistingGrnNo(existing?.grn_no ?? null)
+                setExistingGrn(existing ?? null)
                 return data
             } else {
-                setExistingGrnNo(null)
+                setExistingGrn(null)
                 return null
             }
         },
@@ -100,7 +107,7 @@ function CreateGRNContent() {
                 const ids = pendingRows.map((row: any) => row.id)
                 const { data: existingGrns, error: grnError } = await supabase
                     .from('grns')
-                    .select('gate_entry_id')
+                    .select('gate_entry_id, grn_no, status, created_at')
                     .in('gate_entry_id', ids)
 
                 if (grnError) {
@@ -109,8 +116,30 @@ function CreateGRNContent() {
                     return
                 }
 
-                const createdGateEntries = new Set((existingGrns || []).map((g: any) => g.gate_entry_id))
-                setPendingEntries(pendingRows.filter((row: any) => !createdGateEntries.has(row.id)))
+                const latestGrnByEntry = new Map<string, any>()
+                for (const grn of existingGrns || []) {
+                    const prev = latestGrnByEntry.get(grn.gate_entry_id)
+                    if (!prev || new Date(grn.created_at || 0).getTime() > new Date(prev.created_at || 0).getTime()) {
+                        latestGrnByEntry.set(grn.gate_entry_id, grn)
+                    }
+                }
+
+                const rowsToShow = pendingRows
+                    .filter((row: any) => {
+                        const linkedGrn = latestGrnByEntry.get(row.id)
+                        if (!linkedGrn) return true
+                        return linkedGrn.status === 'DRAFT'
+                    })
+                    .map((row: any) => {
+                        const linkedGrn = latestGrnByEntry.get(row.id)
+                        return {
+                            ...row,
+                            pending_grn_no: linkedGrn?.grn_no ?? null,
+                            pending_grn_status: linkedGrn?.status ?? null
+                        }
+                    })
+
+                setPendingEntries(rowsToShow)
             }
             fetchPending()
         }
@@ -136,8 +165,25 @@ function CreateGRNContent() {
             toast.error('User session not ready. Please sign in again.')
             return
         }
-        if (existingGrnNo) {
-            toast.error(`GRN already created for this entry: ${existingGrnNo}`)
+
+        const containerCount = Number(values.container_count)
+        const unitWeight = Number(values.unit_weight)
+        const storageLocation = String(values.storage_location || '').trim()
+
+        if (!values.pallet_photo) {
+            toast.error('Pallet / stacking photo is required before finalizing GRN.')
+            return
+        }
+        if (!Number.isFinite(containerCount) || containerCount <= 0) {
+            toast.error('Container count must be greater than 0.')
+            return
+        }
+        if (!Number.isFinite(unitWeight) || unitWeight <= 0) {
+            toast.error('Unit weight must be greater than 0.')
+            return
+        }
+        if (!storageLocation) {
+            toast.error('Storage location is required.')
             return
         }
 
@@ -147,22 +193,120 @@ function CreateGRNContent() {
             let photoPath = null
             if (values.pallet_photo) {
                 photoPath = `grn/${Date.now()}_pallet.jpg`
-                await supabase.storage.from('weighbridge-photos').upload(photoPath, values.pallet_photo) // Reusing bucket for now
+                const { error: uploadError } = await supabase.storage.from('weighbridge-photos').upload(photoPath, values.pallet_photo) // Reusing bucket for now
+                if (uploadError) throw uploadError
+            }
+
+            if (existingGrn) {
+                if (existingGrn.status && existingGrn.status !== 'DRAFT') {
+                    toast.error(`GRN ${existingGrn.grn_no} is already finalized (${existingGrn.status}).`)
+                    return
+                }
+
+                const nowIso = new Date().toISOString()
+
+                const { error: updateGrnError } = await supabase
+                    .from('grns')
+                    .update({
+                        pallet_barcode: values.pallet_barcode || null,
+                        container_type: values.container_type,
+                        container_count: containerCount,
+                        unit_weight: unitWeight,
+                        storage_location: storageLocation,
+                        sign_off_manager_id: user.id,
+                        status: 'RECEIVED',
+                        updated_at: nowIso
+                    })
+                    .eq('id', existingGrn.id)
+
+                if (updateGrnError) throw updateGrnError
+
+                const { data: existingContainerRows, error: containerFetchError } = await supabase
+                    .from('container_inventory')
+                    .select('id')
+                    .eq('grn_id', existingGrn.id)
+                    .limit(1)
+
+                if (containerFetchError) throw containerFetchError
+
+                if ((existingContainerRows?.length || 0) > 0) {
+                    const { error: updateContainerError } = await supabase
+                        .from('container_inventory')
+                        .update({
+                            container_type: values.container_type,
+                            units: containerCount,
+                            status: 'AVAILABLE'
+                        })
+                        .eq('id', existingContainerRows![0].id)
+
+                    if (updateContainerError) throw updateContainerError
+                } else {
+                    const { error: insertContainerError } = await supabase
+                        .from('container_inventory')
+                        .insert({
+                            grn_id: existingGrn.id,
+                            container_type: values.container_type,
+                            units: containerCount,
+                            reusable: true,
+                            status: 'AVAILABLE'
+                        })
+
+                    if (insertContainerError) throw insertContainerError
+                }
+
+                const { data: inventoryRows, error: inventoryFetchError } = await supabase
+                    .from('main_inventory')
+                    .select('id')
+                    .eq('grn_id', existingGrn.id)
+
+                if (inventoryFetchError) throw inventoryFetchError
+
+                if ((inventoryRows?.length || 0) === 0) {
+                    const { error: insertInventoryError } = await supabase
+                        .from('main_inventory')
+                        .insert({
+                            material_id: gateEntry.material_id,
+                            grn_id: existingGrn.id,
+                            available_qty: Number(existingGrn.net_qty || gateEntry.net_weight || 0),
+                            reserved_qty: 0,
+                            location_bin: storageLocation,
+                            lot_expiry: existingGrn.itc_expiry_date || null,
+                            last_updated: nowIso
+                        })
+
+                    if (insertInventoryError) throw insertInventoryError
+                }
+
+                setExistingGrn({
+                    ...existingGrn,
+                    status: 'RECEIVED'
+                })
+
+                toast.success(`GRN Finalized: ${existingGrn.grn_no}`)
+                router.push('/stores/inventory')
+                return
             }
 
             const { error, data } = await supabase.rpc('rpc_create_grn_final', {
                 p_gate_entry_id: gateEntryId,
                 p_pallet_barcode: values.pallet_barcode,
                 p_container_type: values.container_type,
-                p_container_count: Number(values.container_count),
-                p_unit_weight: Number(values.unit_weight),
-                p_storage_location: values.storage_location,
+                p_container_count: containerCount,
+                p_unit_weight: unitWeight,
+                p_storage_location: storageLocation,
                 p_manager_id: user.id
             })
 
             if (error) throw error
             toast.success("GRN Created Successfully")
-            setExistingGrnNo(data?.grn_no ?? 'CREATED')
+            setExistingGrn({
+                id: data?.id || '',
+                grn_no: data?.grn_no || 'CREATED',
+                status: data?.status || 'RECEIVED',
+                net_qty: data?.net_qty || null,
+                itc_expiry_date: data?.itc_expiry_date || null,
+                created_at: data?.created_at || null
+            })
             router.push('/stores/inventory')
 
         } catch (error: any) {
@@ -179,11 +323,11 @@ function CreateGRNContent() {
             <div className="max-w-4xl mx-auto py-6">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Pending GRN Finalization (QA Accepted)</CardTitle>
+                        <CardTitle>Pending GRN Actions (QA Cleared + Draft Finalization)</CardTitle>
                     </CardHeader>
                     <CardContent>
                         {pendingEntries.length === 0 ? (
-                            <div className="text-center py-8 text-slate-500">No approved materials pending GRN.</div>
+                            <div className="text-center py-8 text-slate-500">No QA-cleared or draft GRNs pending action.</div>
                         ) : (
                             <div className="grid gap-4">
                                 {pendingEntries.map((entry) => (
@@ -192,10 +336,19 @@ function CreateGRNContent() {
                                         <div>
                                             <div className="font-bold">{entry.materials?.name}</div>
                                             <div className="text-sm text-slate-500">{entry.vendors?.name} - {entry.vehicle_number}</div>
+                                            {entry.pending_grn_status === 'DRAFT' && (
+                                                <div className="text-xs text-blue-700 mt-1">
+                                                    Draft exists: {entry.pending_grn_no}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="text-right">
-                                            <div className="font-mono text-xs bg-green-100 text-green-800 px-2 py-1 rounded mb-1">QA ACCEPTED</div>
-                                            <Button size="sm" variant="outline">Create GRN</Button>
+                                            <div className={`font-mono text-xs px-2 py-1 rounded mb-1 ${entry.pending_grn_status === 'DRAFT' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                                                {entry.pending_grn_status === 'DRAFT' ? 'READY_TO_FINALIZE' : entry.status}
+                                            </div>
+                                            <Button size="sm" variant="outline">
+                                                {entry.pending_grn_status === 'DRAFT' ? 'Finalize GRN' : 'Create GRN'}
+                                            </Button>
                                         </div>
                                     </div>
                                 ))}
@@ -251,68 +404,102 @@ function CreateGRNContent() {
                     </div>
 
                     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                        {existingGrnNo && (
-                            <div className="p-3 text-sm bg-amber-50 border border-amber-200 rounded text-amber-800">
-                                GRN already exists for this gate entry: <strong>{existingGrnNo}</strong>. Duplicate GRN creation is blocked.
+                        {existingGrn && (
+                            <div className="space-y-3 p-3 text-sm bg-blue-50 border border-blue-200 rounded text-blue-900">
+                                {existingGrn.status === 'DRAFT' ? (
+                                    <div>
+                                        Existing draft GRN found: <strong>{existingGrn.grn_no}</strong>. Complete details below and click <strong>Finalize GRN</strong>.
+                                    </div>
+                                ) : (
+                                    <div>
+                                        GRN already finalized for this entry: <strong>{existingGrn.grn_no}</strong> ({existingGrn.status}).
+                                    </div>
+                                )}
+                                <div className="text-blue-800">
+                                    Gate Entry ID: <strong>{gateEntry.id}</strong> | Challan: <strong>{gateEntry.challan_no || 'N/A'}</strong>
+                                </div>
+                                <Button type="button" variant="outline" onClick={() => router.push('/stores/grn-create')}>
+                                    Back to Pending GRN Queue
+                                </Button>
                             </div>
                         )}
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>Container Type</Label>
+                        {existingGrn?.status && existingGrn.status !== 'DRAFT' ? (
+                            <div className="space-y-3">
+                                <Button type="button" className="w-full" onClick={() => router.push('/stores/inventory')}>
+                                    View in Inventory
+                                </Button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Container Type</Label>
+                                        <Controller
+                                            control={form.control}
+                                            name="container_type"
+                                            render={({ field }) => (
+                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="BAG">Bag</SelectItem>
+                                                        <SelectItem value="DRUM">Drum</SelectItem>
+                                                        <SelectItem value="BOX">Box</SelectItem>
+                                                        <SelectItem value="ISO_TANK">ISO Tank</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            )}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Pallet Barcode</Label>
+                                        <Input {...form.register('pallet_barcode')} placeholder="Scan..." />
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2">
+                                        <Label>Container Count</Label>
+                                        <Input type="number" {...form.register('container_count', { valueAsNumber: true })} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Unit Weight (kg)</Label>
+                                        <Input type="number" step="0.01" {...form.register('unit_weight', { valueAsNumber: true })} />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>Storage Location</Label>
+                                    <Input {...form.register('storage_location')} placeholder="Main Store Location" />
+                                </div>
+
                                 <Controller
                                     control={form.control}
-                                    name="container_type"
+                                    name="pallet_photo"
                                     render={({ field }) => (
-                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="BAG">Bag</SelectItem>
-                                                <SelectItem value="DRUM">Drum</SelectItem>
-                                                <SelectItem value="BOX">Box</SelectItem>
-                                                <SelectItem value="ISO_TANK">ISO Tank</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                        <PhotoCapture
+                                            label="Pallet / Stacking Photo"
+                                            onCapture={field.onChange}
+                                            required
+                                        />
                                     )}
                                 />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Pallet Barcode</Label>
-                                <Input {...form.register('pallet_barcode')} placeholder="Scan..." />
-                            </div>
-                        </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>Container Count</Label>
-                                <Input type="number" {...form.register('container_count', { valueAsNumber: true })} />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Unit Weight (kg)</Label>
-                                <Input type="number" step="0.01" {...form.register('unit_weight', { valueAsNumber: true })} />
-                            </div>
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label>Storage Location</Label>
-                            <Input {...form.register('storage_location')} placeholder="Main Store Location" />
-                        </div>
-
-                        <Controller
-                            control={form.control}
-                            name="pallet_photo"
-                            render={({ field }) => (
-                                <PhotoCapture
-                                    label="Pallet / Stacking Photo"
-                                    onCapture={field.onChange}
-                                    required
-                                />
-                            )}
-                        />
-
-                        <Button type="submit" className="w-full" disabled={isSubmitting || !!existingGrnNo}>
-                            {isSubmitting ? <Loader2 className="animate-spin" /> : "Generate GRN"}
-                        </Button>
+                                <Button
+                                    type="submit"
+                                    className="w-full"
+                                    disabled={isSubmitting}
+                                >
+                                    {isSubmitting ? (
+                                        <Loader2 className="animate-spin" />
+                                    ) : existingGrn?.status === 'DRAFT' ? (
+                                        'Finalize GRN'
+                                    ) : (
+                                        'Generate GRN'
+                                    )}
+                                </Button>
+                            </>
+                        )}
                     </form>
                 </CardContent>
             </Card>

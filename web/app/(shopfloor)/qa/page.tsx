@@ -239,28 +239,35 @@ function QAPageContent() {
         setIsSubmitting(true)
 
         try {
-            const { error } = await supabase.rpc('rpc_submit_qa_inspection', {
-                p_gate_entry_id: gateEntryId,
-                p_result: 'ACCEPT',
-                p_inspector_id: user.id,
-                p_auto_hold: false,
-                p_lab_photos: [],
-                // Include all missing physical check parameters so DB row is created
-                p_vendor_mfg_date: values.vendor_mfg_date || null,
-                p_vendor_expiry_date: values.vendor_expiry_date || null,
-                p_itc_expiry_date: values.itc_expiry_date || null,
-                p_appearance: values.appearance,
-                p_odour: values.taste_and_smell === 'Other' ? values.taste_and_smell_other : values.taste_and_smell,
-                p_moisture_pct: Number(values.moisture_pct),
-                p_foreign_matter: (values.free_from !== 'None' && values.free_from !== 'Yes') || values.foreign_matter,
-                p_hold_reason: null
-            })
-            if (error) {
-                console.error('QA RPC Error:', error)
-                // Fallback: just advance status if RPC fails (though GRN may still fail if row is missing)
-                await updateGateStatus('QA_ACCEPTED')
+            const { error: insertQaError } = await supabase
+                .from('qa_inspections')
+                .insert({
+                    gate_entry_id: gateEntryId,
+                    vendor_mfg_date: values.vendor_mfg_date || null,
+                    vendor_expiry_date: values.vendor_expiry_date || null,
+                    itc_expiry_date: values.itc_expiry_date || null,
+                    appearance: values.appearance,
+                    odour: values.taste_and_smell === 'Other' ? values.taste_and_smell_other : values.taste_and_smell,
+                    moisture_pct: Number(values.moisture_pct),
+                    foreign_matter_detected: (values.free_from !== 'None' && values.free_from !== 'Yes') || values.foreign_matter,
+                    lab_photos: [],
+                    result: 'ACCEPT',
+                    hold_reason: null,
+                    inspector_id: user.id,
+                })
+
+            if (insertQaError) {
+                console.error('QA direct insert error:', insertQaError)
             }
-            toast.success('QA Accepted — proceeding to GRN creation')
+
+            await updateGateStatus('QA_OK')
+
+            if (insertQaError) {
+                toast.warning('QA accepted. GRN creation is unlocked. QA log insert failed; please inform admin if this repeats.')
+            } else {
+                toast.success('QA accepted. Proceed to Stores and click Create GRN.')
+            }
+
             router.push(`/stores/grn-create?entry_id=${gateEntryId}`)
         } catch (err: any) {
             toast.error('Submission Failed', { description: err.message })
