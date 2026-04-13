@@ -99,6 +99,22 @@ type SourceCoverageRow = {
     capturedFields: string
 }
 
+type InventoryBlockRow = {
+    recipe: string
+    material: string
+    requiredKg: number
+    availableKg: number
+    shortageKg: number
+}
+
+type InventoryReadinessSummary = {
+    totalActiveRecipes: number
+    blockedRecipeCount: number
+    readyRecipeCount: number
+    totalShortageKg: number
+    topBlockedRows: InventoryBlockRow[]
+}
+
 type AllTimeKpis = {
     totalGateEntries: number
     totalExpectedIntakeKg: number
@@ -140,6 +156,7 @@ type DashboardData = {
     machineDowntime: MachineDowntimeRow[]
     allTimeRecipeMix: RecipeMixRow[]
     sourceCoverage: SourceCoverageRow[]
+    inventoryReadiness: InventoryReadinessSummary
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -249,6 +266,9 @@ export default function ProductionDashboard() {
                 bakingRes,
                 fgBatchRes,
                 dispatchRes,
+                recipeTemplateRes,
+                recipeItemsRes,
+                inventoryRes,
             ] = await Promise.all([
                 supabase
                     .from('packing_process_logs')
@@ -282,6 +302,16 @@ export default function ProductionDashboard() {
                 supabase
                     .from('dispatches')
                     .select('quantity'),
+                supabase
+                    .from('recipe_templates')
+                    .select('id, sku, name, is_active')
+                    .eq('is_active', true),
+                supabase
+                    .from('recipe_items')
+                    .select('template_id, material_id, qty_per_batch, materials(name, material_code)'),
+                supabase
+                    .from('main_inventory')
+                    .select('material_id, available_qty, grns(status)'),
             ])
 
             if (packingWeekRes.error) throw packingWeekRes.error
@@ -294,6 +324,9 @@ export default function ProductionDashboard() {
             if (bakingRes.error) throw bakingRes.error
             if (fgBatchRes.error) throw fgBatchRes.error
             if (dispatchRes.error) throw dispatchRes.error
+            if (recipeTemplateRes.error) throw recipeTemplateRes.error
+            if (recipeItemsRes.error) throw recipeItemsRes.error
+            if (inventoryRes.error) throw inventoryRes.error
 
             const packingRows = (packingWeekRes.data || []) as PackingLogRow[]
             const packingAllRows = (packingAllRes.data || []) as PackingLogRow[]
@@ -302,6 +335,9 @@ export default function ProductionDashboard() {
             const qaRows = (qaRes.data || []) as QaInspectionRow[]
             const dispatchRows = (dispatchRes.data || []) as DispatchRow[]
             const fgBatchRows = (fgBatchRes.data || []) as FgBatchRow[]
+            const recipeTemplateRows = (recipeTemplateRes.data || []) as Array<{ id?: string; sku?: string | null; name?: string | null; is_active?: boolean | null }>
+            const recipeItemRows = (recipeItemsRes.data || []) as Array<{ template_id?: string | null; material_id?: string | null; qty_per_batch?: number | string | null; materials?: { name?: string | null; material_code?: string | null } | null }>
+            const inventoryRows = (inventoryRes.data || []) as Array<{ material_id?: string | null; available_qty?: number | string | null; grns?: { status?: string | null } | null }>
 
             const todayStartMs = todayStart.getTime()
             const yesterdayStartMs = yesterdayStart.getTime()
@@ -588,6 +624,81 @@ export default function ProductionDashboard() {
                 dispatchVsProductionPct: allTimePacks > 0 ? clampPct((totalDispatchedPacks / allTimePacks) * 100) : 0,
             }
 
+            const availableByMaterial = new Map<string, number>()
+            for (const row of inventoryRows) {
+                const materialId = String(row.material_id || '')
+                if (!materialId) continue
+
+                const status = String(row.grns?.status || '').toUpperCase()
+                if (status && status !== 'RECEIVED') continue
+
+                const available = toNumber(row.available_qty)
+                availableByMaterial.set(materialId, (availableByMaterial.get(materialId) || 0) + available)
+            }
+
+            const recipeNameById = new Map<string, string>()
+            for (const recipe of recipeTemplateRows) {
+                const recipeId = String(recipe.id || '')
+                if (!recipeId) continue
+                recipeNameById.set(recipeId, String(recipe.name || recipe.sku || recipeId.slice(0, 8)))
+            }
+
+            const itemsByTemplateId = new Map<string, Array<{ materialId: string; materialName: string; requiredKg: number }>>()
+            for (const row of recipeItemRows) {
+                const templateId = String(row.template_id || '')
+                const materialId = String(row.material_id || '')
+                if (!templateId || !materialId) continue
+
+                const requiredKg = toNumber(row.qty_per_batch)
+                if (requiredKg <= 0) continue
+
+                const materialName = String(row.materials?.name || row.materials?.material_code || materialId.slice(0, 8))
+                const existing = itemsByTemplateId.get(templateId) || []
+                existing.push({ materialId, materialName, requiredKg })
+                itemsByTemplateId.set(templateId, existing)
+            }
+
+            let blockedRecipeCount = 0
+            const blockRows: InventoryBlockRow[] = []
+
+            for (const recipe of recipeTemplateRows) {
+                const recipeId = String(recipe.id || '')
+                if (!recipeId) continue
+
+                const items = itemsByTemplateId.get(recipeId) || []
+                if (items.length === 0) continue
+
+                let blockedForRecipe = false
+                for (const item of items) {
+                    const availableKg = availableByMaterial.get(item.materialId) || 0
+                    if (availableKg + 0.0001 < item.requiredKg) {
+                        blockedForRecipe = true
+                        blockRows.push({
+                            recipe: recipeNameById.get(recipeId) || recipeId.slice(0, 8),
+                            material: item.materialName,
+                            requiredKg: Number(item.requiredKg.toFixed(3)),
+                            availableKg: Number(availableKg.toFixed(3)),
+                            shortageKg: Number((item.requiredKg - availableKg).toFixed(3)),
+                        })
+                    }
+                }
+
+                if (blockedForRecipe) {
+                    blockedRecipeCount += 1
+                }
+            }
+
+            const totalActiveRecipes = recipeTemplateRows.length
+            const inventoryReadiness: InventoryReadinessSummary = {
+                totalActiveRecipes,
+                blockedRecipeCount,
+                readyRecipeCount: Math.max(totalActiveRecipes - blockedRecipeCount, 0),
+                totalShortageKg: Number(blockRows.reduce((sum, row) => sum + row.shortageKg, 0).toFixed(3)),
+                topBlockedRows: blockRows
+                    .sort((a, b) => b.shortageKg - a.shortageKg)
+                    .slice(0, 5),
+            }
+
             const sourceCoverage: SourceCoverageRow[] = [
                 {
                     route: '/gate',
@@ -669,6 +780,7 @@ export default function ProductionDashboard() {
                 machineDowntime,
                 allTimeRecipeMix,
                 sourceCoverage,
+                inventoryReadiness,
             }
         },
     })
@@ -712,6 +824,13 @@ export default function ProductionDashboard() {
         machineDowntime: [],
         allTimeRecipeMix: [],
         sourceCoverage: [],
+        inventoryReadiness: {
+            totalActiveRecipes: 0,
+            blockedRecipeCount: 0,
+            readyRecipeCount: 0,
+            totalShortageKg: 0,
+            topBlockedRows: [],
+        },
     }
 
     const dashboard: DashboardData = {
@@ -723,6 +842,7 @@ export default function ProductionDashboard() {
         machineDowntime: dashboardData?.machineDowntime ?? defaultDashboard.machineDowntime,
         allTimeRecipeMix: dashboardData?.allTimeRecipeMix ?? defaultDashboard.allTimeRecipeMix,
         sourceCoverage: dashboardData?.sourceCoverage ?? defaultDashboard.sourceCoverage,
+        inventoryReadiness: dashboardData?.inventoryReadiness ?? defaultDashboard.inventoryReadiness,
         allTime: { ...defaultDashboard.allTime, ...(dashboardData?.allTime || {}) },
     }
 
@@ -864,13 +984,66 @@ export default function ProductionDashboard() {
                     </div>
                 </div>
 
+                <div className={`border rounded-xl shadow-sm p-5 ${dashboard.inventoryReadiness.blockedRecipeCount > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div>
+                            <div className="text-xs font-semibold uppercase tracking-wider text-gray-600">Post-GRN Start Readiness</div>
+                            <h3 className="text-lg font-bold text-gray-900 mt-1">Blocked by Inventory Status</h3>
+                        </div>
+                        {dashboard.inventoryReadiness.blockedRecipeCount > 0 ? (
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-red-100 text-red-800 border border-red-200 text-sm font-medium">
+                                <AlertTriangle className="h-4 w-4" />
+                                {dashboard.inventoryReadiness.blockedRecipeCount} recipe(s) blocked
+                            </div>
+                        ) : (
+                            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 text-sm font-medium">
+                                <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-70"></span>
+                                    <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600"></span>
+                                </span>
+                                All active recipes ready
+                            </div>
+                        )}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4 text-sm">
+                        <div className="bg-white/80 border border-white rounded-md p-3">
+                            <div className="text-xs text-gray-500 uppercase tracking-wider">Active Recipes</div>
+                            <div className="text-2xl font-mono font-semibold text-gray-900 mt-1">{dashboard.inventoryReadiness.totalActiveRecipes}</div>
+                        </div>
+                        <div className="bg-white/80 border border-white rounded-md p-3">
+                            <div className="text-xs text-gray-500 uppercase tracking-wider">Ready Now</div>
+                            <div className="text-2xl font-mono font-semibold text-emerald-700 mt-1">{dashboard.inventoryReadiness.readyRecipeCount}</div>
+                        </div>
+                        <div className="bg-white/80 border border-white rounded-md p-3">
+                            <div className="text-xs text-gray-500 uppercase tracking-wider">Total Shortage</div>
+                            <div className="text-2xl font-mono font-semibold text-red-700 mt-1">{dashboard.inventoryReadiness.totalShortageKg.toFixed(3)} kg</div>
+                        </div>
+                    </div>
+                    {dashboard.inventoryReadiness.topBlockedRows.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                            {dashboard.inventoryReadiness.topBlockedRows.map((row, index) => (
+                                <div key={`${row.recipe}-${row.material}-${index}`} className="bg-white/90 border border-red-100 rounded-md p-3 text-sm flex flex-col md:flex-row md:items-center md:justify-between gap-1">
+                                    <div className="text-gray-700">
+                                        <span className="font-semibold text-gray-900">{row.recipe}</span>
+                                        <span className="mx-2 text-gray-400">|</span>
+                                        <span>{row.material}</span>
+                                    </div>
+                                    <div className="font-mono text-red-800">
+                                        need {row.requiredKg.toFixed(3)} kg / avail {row.availableKg.toFixed(3)} kg / short {row.shortageKg.toFixed(3)} kg
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
                 <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4 text-xs text-gray-600 space-y-1">
                     <div className="font-semibold text-gray-900 mb-1">Formula & Data Lineage</div>
                     <p>OEE = Availability x Performance x Quality, where Availability = (Planned Mins - Downtime Mins) / Planned Mins, Performance = Actual Packs / Target Packs, and Quality = (Packs - MD Rejects) / Packs.</p>
                     <p>All-Time Waste (kg) = SUM(packing_process_logs.wrapper_waste_kg) + SUM(downtime_tickets.remarks.__METRICS__.estimated_wastage_kg).</p>
                     <p>All-Time Downtime (mins) = SUM((end_ts - start_ts) in minutes) using live now for open tickets.</p>
                     <p>Dispatch / Production % = SUM(dispatches.quantity) / SUM(packing_process_logs.packs_produced) x 100.</p>
-                    <p>Sources: gate_entries, qa_inspections, sub_batches, cutting_logs, baking_process_logs, packing_process_logs, downtime_tickets, fg_batches, dispatches, recipe_templates.</p>
+                    <p>Sources: gate_entries, qa_inspections, sub_batches, cutting_logs, baking_process_logs, packing_process_logs, downtime_tickets, fg_batches, dispatches, recipe_templates, recipe_items, main_inventory.</p>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

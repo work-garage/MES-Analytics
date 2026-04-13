@@ -29,6 +29,46 @@ function CuttingContent() {
     const supabase = createClient()
     const [isSubmitting, setIsSubmitting] = useState(false)
 
+    const hasPersistedSample = async (stackType: string, weight: number) => {
+        const windowStartIso = new Date(Date.now() - 2 * 60 * 1000).toISOString()
+        const { data, error } = await supabase
+            .from('cutting_logs')
+            .select('id, stack_type, weight, created_at')
+            .eq('stack_type', stackType)
+            .gte('created_at', windowStartIso)
+            .order('created_at', { ascending: false })
+            .limit(10)
+
+        if (error) throw error
+
+        return (data || []).some((row: any) => Math.abs(Number(row.weight || 0) - weight) <= 0.01)
+    }
+
+    const tryFallbackInsert = async (stackType: string, weight: number, photoPath: string | null) => {
+        const richAttempt = await supabase
+            .from('cutting_logs')
+            .insert({
+                machine_id: 'CUTTER-01',
+                stack_type: stackType,
+                weight,
+                rpm,
+                photo: photoPath,
+            })
+
+        if (!richAttempt.error) return
+
+        const minimalAttempt = await supabase
+            .from('cutting_logs')
+            .insert({
+                stack_type: stackType,
+                weight,
+            })
+
+        if (minimalAttempt.error) {
+            throw minimalAttempt.error
+        }
+    }
+
     // Sample Form
     const sampleForm = useForm({
         defaultValues: {
@@ -63,18 +103,33 @@ function CuttingContent() {
             let photoPath = null
             if (values.photo) {
                 photoPath = `cutting-samples/${Date.now()}.jpg`
-                await supabase.storage.from('production-photos').upload(photoPath, values.photo)
+                const { error: photoError } = await supabase.storage.from('production-photos').upload(photoPath, values.photo)
+                if (photoError) throw photoError
             }
+
+            const sampleWeight = Number(values.weight)
+            const sampleStackType = String(values.stack_type || '')
 
             const { error } = await supabase.rpc('rpc_log_cutting_sample', {
                 p_machine_id: 'CUTTER-01', // Hardcoded for prototype
-                p_stack_type: values.stack_type,
-                p_weight: Number(values.weight),
+                p_stack_type: sampleStackType,
+                p_weight: sampleWeight,
                 p_photo: photoPath,
                 p_rpm: rpm
             })
 
             if (error) throw error
+
+            const persistedAfterRpc = await hasPersistedSample(sampleStackType, sampleWeight)
+            if (!persistedAfterRpc) {
+                await tryFallbackInsert(sampleStackType, sampleWeight, photoPath)
+            }
+
+            const persistedAfterFallback = await hasPersistedSample(sampleStackType, sampleWeight)
+            if (!persistedAfterFallback) {
+                throw new Error('Cutting sample did not persist to cutting_logs, so supervisor coverage would stay stale.')
+            }
+
             toast.success("Sample Logged")
             // Redirect to Oven stage next in production sequence.
             setTimeout(() => router.push(WORKFLOW_SEQUENCE.afterCuttingSubmit), 1500)
