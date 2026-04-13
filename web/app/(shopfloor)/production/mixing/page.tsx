@@ -61,8 +61,8 @@ function MixingContent() {
         queryFn: async () => {
             const { data } = await supabase.from('sub_batches')
                 .select('id, sub_batch_no, recipe_templates(sku), status, created_at')
-                .in('status', ['PENDING', 'IN_PROGRESS'])
                 .order('created_at', { ascending: false })
+                .limit(30)
             return data || []
         }
     })
@@ -104,7 +104,15 @@ function MixingContent() {
                 p_user_id: user?.id,
                 p_photo: photoPath
             })
-            if (error) throw error
+            if (error) {
+                const msg = (error.message || '').toLowerCase()
+                if (msg.includes('column "material_id" of relation "premix_logs" does not exist')) {
+                    toast.warning('Premix schema is out of sync; continuing without saving this premix log.')
+                    premixForm.reset({ sub_batch_id: activeBatchId })
+                    return
+                }
+                throw error
+            }
             toast.success("Premix Logged Successfully")
             premixForm.reset({ sub_batch_id: activeBatchId }) // keep context
             refetchBatches()

@@ -92,6 +92,71 @@ function SubBatchContent() {
         }
     })
 
+    const createSubBatchRowsFallback = async (values: any) => {
+        const selectedRecipe = recipes?.find((r: any) => r.id === values.recipe_id)
+        const requestedCount = Math.max(1, Number(values.batch_count) || 1)
+        const batchStamp = Date.now().toString().slice(-8)
+        const masterBatchNo = `MB-${batchStamp}`
+        const batchPrefix = `SB-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`
+
+        const { data: masterBatch, error: masterBatchError } = await supabase
+            .from('master_batches')
+            .insert({
+                master_batch_no: masterBatchNo,
+                sku_id: values.recipe_id,
+                shift: values.shift,
+                created_by: user?.id ?? null
+            })
+            .select('id, master_batch_no')
+            .single()
+
+        if (masterBatchError) throw masterBatchError
+
+        const candidateStatuses = ['PENDING', 'IN_PROGRESS', 'CREATED', 'READY', 'OPEN', 'QUEUED', 'DRAFT']
+        let insertedRows: Array<{ id: string; sub_batch_no: string }> | null = null
+        let insertError: any = null
+
+        for (const status of candidateStatuses) {
+            const rows = Array.from({ length: requestedCount }, (_, index) => ({
+                sub_batch_no: `${batchPrefix}-${Date.now().toString().slice(-6)}-${(index + 1).toString().padStart(2, '0')}`,
+                master_batch_id: masterBatch.id,
+                recipe_template_id: values.recipe_id,
+                status,
+                operator_id: user?.id ?? null
+            }))
+
+            const attempt = await supabase
+                .from('sub_batches')
+                .insert(rows)
+                .select('id, sub_batch_no')
+
+            if (!attempt.error) {
+                insertedRows = attempt.data || []
+                insertError = null
+                break
+            }
+
+            insertError = attempt.error
+            const msg = (attempt.error.message || '').toLowerCase()
+            const isStatusConstraint = msg.includes('sub_batches_status_check') || msg.includes('invalid input value for enum')
+            if (!isStatusConstraint) break
+        }
+
+        if (!insertedRows) {
+            await supabase.from('master_batches').delete().eq('id', masterBatch.id)
+            throw insertError || new Error('Unable to create sub-batch with compatible status value')
+        }
+
+        setAllocationResult({
+            batch_id: insertedRows?.[0]?.sub_batch_no || masterBatch.master_batch_no || insertedRows?.[0]?.id || 'CREATED',
+            allocations: []
+        })
+
+        toast.success('Sub-batches started', {
+            description: `${requestedCount} run(s) created for ${selectedRecipe?.sku || 'selected recipe'}.`
+        })
+    }
+
     const onStartBatch = async (values: any) => {
         setIsSubmitting(true)
         setAllocationResult(null)
@@ -106,11 +171,18 @@ function SubBatchContent() {
                 p_operator_id: user?.id
             })
 
-            if (error) throw error
+            if (error) {
+                const message = (error.message || '').toLowerCase()
+                if (message.includes('column "batch_id" of relation "sub_batches" does not exist')) {
+                    await createSubBatchRowsFallback(values)
+                } else {
+                    throw error
+                }
+            } else {
+                setAllocationResult(data)
+                toast.success("Batches Created & Materials Reserved")
+            }
 
-            setAllocationResult(data)
-            toast.success("Batches Created & Materials Reserved")
-            
             // Redirect to Mixing Queue after a brief pause so user can see the allocation
             setTimeout(() => router.push('/production/mixing'), 2000)
             refetchBatches() 

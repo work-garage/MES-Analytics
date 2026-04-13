@@ -37,7 +37,7 @@ export default function TopNotifications({ buttonClassName }: TopNotificationsPr
                 supabase.from('dispatches').select('id, dispatch_no, destination, created_at').order('created_at', { ascending: false }).limit(6),
                 supabase.from('sub_inventory_transfers').select('id, transfer_no, from_location, to_location, created_at').order('created_at', { ascending: false }).limit(6),
                 supabase.from('grns').select('id, grn_no, status, created_at').order('created_at', { ascending: false }).limit(6),
-                supabase.from('fg_batches').select('id, fg_batch_no, status, created_at').order('created_at', { ascending: false }).limit(6),
+                supabase.from('fg_batches').select('id, fg_batch_no, created_at').order('created_at', { ascending: false }).limit(6),
             ])
 
             const events: NotificationItem[] = []
@@ -82,7 +82,7 @@ export default function TopNotifications({ buttonClassName }: TopNotificationsPr
                 events.push({
                     id: `f-${row.id}`,
                     type: 'fg',
-                    message: `FG Batch ${row.fg_batch_no} created (${row.status || 'OPEN'})`,
+                    message: `FG Batch ${row.fg_batch_no} created`,
                     createdAt: row.created_at,
                 })
             }

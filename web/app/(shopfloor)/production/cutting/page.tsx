@@ -29,7 +29,13 @@ function CuttingContent() {
     const [isSubmitting, setIsSubmitting] = useState(false)
 
     // Sample Form
-    const sampleForm = useForm()
+    const sampleForm = useForm({
+        defaultValues: {
+            stack_type: '',
+            weight: undefined,
+            photo: undefined,
+        }
+    })
 
     // Capacity Calculator State
     const [rpm, setRpm] = useState(0)
@@ -153,7 +159,7 @@ function CuttingContent() {
                                         control={sampleForm.control}
                                         name="stack_type"
                                         render={({ field }) => (
-                                            <Select onValueChange={field.onChange} value={field.value}>
+                                            <Select onValueChange={field.onChange} value={field.value || ''}>
                                                 <SelectTrigger><SelectValue placeholder="Select Area" /></SelectTrigger>
                                                 <SelectContent>
                                                     <SelectItem value="WORKING_L">Working Side L</SelectItem>

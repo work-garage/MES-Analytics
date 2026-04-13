@@ -287,25 +287,98 @@ function CreateGRNContent() {
                 return
             }
 
-            const { error, data } = await supabase.rpc('rpc_create_grn_final', {
-                p_gate_entry_id: gateEntryId,
-                p_pallet_barcode: values.pallet_barcode,
-                p_container_type: values.container_type,
-                p_container_count: containerCount,
-                p_unit_weight: unitWeight,
-                p_storage_location: storageLocation,
-                p_manager_id: user.id
-            })
+            const nowIso = new Date().toISOString()
+            const ts = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 8)
+            const suffix = Math.random().toString(16).slice(2, 6)
+            const generatedGrnNo = `GRN-${ts}-${suffix}`
 
-            if (error) throw error
-            toast.success("GRN Created Successfully")
+            const { data: latestQa } = await supabase
+                .from('qa_inspections')
+                .select('itc_expiry_date, vendor_expiry_date, vendor_mfg_date')
+                .eq('gate_entry_id', gateEntryId)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle()
+
+            const { data: createdGrn, error: createGrnError } = await supabase
+                .from('grns')
+                .insert({
+                    grn_no: generatedGrnNo,
+                    gate_entry_id: gateEntryId,
+                    vendor_id: gateEntry.vendor_id ?? null,
+                    vehicle_no: gateEntry.vehicle_number ?? null,
+                    challan_no: gateEntry.challan_no ?? null,
+                    challan_date: gateEntry.challan_date ?? null,
+                    expected_qty: Number(gateEntry.expected_qty || 0),
+                    gross_weight: Number(gateEntry.gross_weight || 0),
+                    tare_weight: Number(gateEntry.tare_weight || 0),
+                    net_qty: Number(gateEntry.net_weight || 0),
+                    weighbridge_slip_no: gateEntry.weighbridge_slip_no ?? gateEntryId,
+                    vendor_expiry_date: latestQa?.vendor_expiry_date ?? null,
+                    itc_expiry_date: latestQa?.itc_expiry_date ?? null,
+                    pallet_barcode: values.pallet_barcode || null,
+                    container_type: values.container_type,
+                    container_count: containerCount,
+                    unit_weight: unitWeight,
+                    storage_location: storageLocation,
+                    sign_off_manager_id: user.id,
+                    created_by: user.id,
+                    status: 'RECEIVED',
+                    updated_at: nowIso,
+                })
+                .select('id, grn_no, status, net_qty, itc_expiry_date, created_at')
+                .single()
+
+            if (createGrnError) {
+                if (/duplicate|unique/i.test(createGrnError.message || '')) {
+                    const { data: linkedExisting } = await supabase
+                        .from('grns')
+                        .select('id, grn_no, status, net_qty, itc_expiry_date, created_at')
+                        .eq('gate_entry_id', gateEntryId)
+                        .maybeSingle()
+                    if (linkedExisting) {
+                        setExistingGrn(linkedExisting)
+                        toast.warning(`GRN already exists for this entry: ${linkedExisting.grn_no}`)
+                        return
+                    }
+                }
+                throw createGrnError
+            }
+
+            const { error: insertContainerError } = await supabase
+                .from('container_inventory')
+                .insert({
+                    grn_id: createdGrn.id,
+                    container_type: values.container_type,
+                    units: containerCount,
+                    reusable: true,
+                    status: 'AVAILABLE'
+                })
+
+            if (insertContainerError) throw insertContainerError
+
+            const { error: insertInventoryError } = await supabase
+                .from('main_inventory')
+                .insert({
+                    material_id: gateEntry.material_id,
+                    grn_id: createdGrn.id,
+                    available_qty: Number(createdGrn.net_qty || gateEntry.net_weight || 0),
+                    reserved_qty: 0,
+                    location_bin: storageLocation,
+                    lot_expiry: createdGrn.itc_expiry_date || null,
+                    last_updated: nowIso
+                })
+
+            if (insertInventoryError) throw insertInventoryError
+
+            toast.success('GRN Created Successfully')
             setExistingGrn({
-                id: data?.id || '',
-                grn_no: data?.grn_no || 'CREATED',
-                status: data?.status || 'RECEIVED',
-                net_qty: data?.net_qty || null,
-                itc_expiry_date: data?.itc_expiry_date || null,
-                created_at: data?.created_at || null
+                id: createdGrn?.id || '',
+                grn_no: createdGrn?.grn_no || generatedGrnNo,
+                status: createdGrn?.status || 'RECEIVED',
+                net_qty: createdGrn?.net_qty || null,
+                itc_expiry_date: createdGrn?.itc_expiry_date || null,
+                created_at: createdGrn?.created_at || null
             })
             router.push('/stores/inventory')
 
