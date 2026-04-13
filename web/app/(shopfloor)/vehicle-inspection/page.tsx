@@ -15,6 +15,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { toast } from 'sonner'
 import { Loader2, CheckCircle, XCircle, AlertTriangle, PauseCircle } from 'lucide-react'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 export default function VehicleInspectionPage() {
     return (
@@ -173,7 +174,7 @@ function VehicleInspectionContent() {
                 await updateGateStatus('INSPECTED_OK')
             }
             toast.success('Vehicle Inspection Passed — proceeding to QA')
-            router.push(`/qa?id=${gateEntryId}`)
+            router.push(`${WORKFLOW_SEQUENCE.afterVehicleInspectionAccept}?id=${gateEntryId}`)
         } catch (err: any) {
             toast.error('Submission Failed', { description: err.message })
         } finally {

@@ -18,6 +18,7 @@ import { ManualFallbackToggle } from '@/components/ui/manual-fallback-toggle'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { AlertTriangle, Lock, Loader2, ArrowLeft, Truck, FileText, Scale, ArrowRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 export default function WeighbridgePage() {
     return (
@@ -157,7 +158,7 @@ function WeighbridgeContent() {
             if (error) throw error
 
             toast.success("Weighbridge Entry Confirmed")
-            router.push(`/vehicle-inspection?id=${entryId}`)
+            router.push(`${WORKFLOW_SEQUENCE.afterWeighbridgeSubmit}?id=${entryId}`)
 
         } catch (error: any) {
             toast.error("Submission Failed", { description: error.message })

@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/store/auth'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,12 +12,14 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { Loader2, Wrench } from 'lucide-react'
+import { Loader2, Wrench, Square, Clock } from 'lucide-react'
 import {
     DOWNTIME_CATEGORIES,
     DOWNTIME_REASONS,
     DOWNTIME_STAGES,
+    getDowntimeReasonLabel,
 } from '@/lib/constants/maintenance'
 
 type DowntimeFormValues = {
@@ -26,11 +28,22 @@ type DowntimeFormValues = {
     stage: string
     reason: string
     reason_other: string
-    estimated_duration_mins: number
     estimated_wastage_kg: number
     estimated_output_loss_kg: number
     remarks: string
     oven_shutdown: boolean
+}
+
+type ActiveDowntimeTicket = {
+    id: string
+    ticket_no: string | null
+    status: string | null
+    stage: string | null
+    reason_code: string | null
+    start_ts: string | null
+    end_ts: string | null
+    created_at: string | null
+    machines?: { name?: string | null; code?: string | null } | null
 }
 
 function generateTicketNo() {
@@ -51,7 +64,6 @@ async function createDowntimeWithFallback(
         ? `Other reason: ${values.reason_other.trim()}`
         : ''
     const metrics = {
-        estimated_duration_mins: Number(values.estimated_duration_mins || 0),
         estimated_wastage_kg: Number(values.estimated_wastage_kg || 0),
         estimated_output_loss_kg: Number(values.estimated_output_loss_kg || 0),
     }
@@ -104,10 +116,77 @@ async function createDowntimeWithFallback(
     throw lastError
 }
 
+function getDurationMins(startTs: string | null | undefined, endTs?: string | null | undefined) {
+    if (!startTs) return 0
+    const start = new Date(startTs).getTime()
+    const end = endTs ? new Date(endTs).getTime() : Date.now()
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0
+    return Math.max(Math.round((end - start) / 60000), 0)
+}
+
+async function stopDowntimeWithFallback(
+    supabase: ReturnType<typeof createClient>,
+    ticketId: string,
+    userId: string,
+    closureNote: string,
+) {
+    const rpcAttempt = await supabase.rpc('close_downtime_ticket', {
+        p_ticket_id: ticketId,
+        p_mechanic_name: 'Shopfloor Operator',
+        p_parts_used: null,
+        p_closure_notes: closureNote || 'Stopped from shopfloor downtime console',
+    })
+
+    if (!rpcAttempt.error) return
+
+    const nowIso = new Date().toISOString()
+    const candidates = [
+        {
+            status: 'CLOSED',
+            end_ts: nowIso,
+            closed_at: nowIso,
+            closed_by: userId,
+            closure_notes: closureNote || null,
+            updated_at: nowIso,
+        },
+        {
+            status: 'CLOSED',
+            end_ts: nowIso,
+            closed_by: userId,
+            updated_at: nowIso,
+        },
+        {
+            status: 'CLOSED',
+            end_ts: nowIso,
+            updated_at: nowIso,
+        },
+        {
+            status: 'CLOSED',
+            end_ts: nowIso,
+        },
+    ]
+
+    let lastError: any = rpcAttempt.error
+    for (const payload of candidates) {
+        const { error } = await supabase
+            .from('downtime_tickets')
+            .update(payload)
+            .eq('id', ticketId)
+        if (!error) return
+        lastError = error
+    }
+
+    throw lastError
+}
+
 export default function DowntimePage() {
     const { user } = useAuth()
     const supabase = createClient()
+    const queryClient = useQueryClient()
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const [stoppingId, setStoppingId] = useState<string | null>(null)
+    const [stopNotes, setStopNotes] = useState<Record<string, string>>({})
+    const [tick, setTick] = useState(Date.now())
 
     const form = useForm<DowntimeFormValues>({
         defaultValues: {
@@ -116,7 +195,6 @@ export default function DowntimePage() {
             stage: 'CUTTING',
             reason: 'NO_MATERIAL',
             reason_other: '',
-            estimated_duration_mins: 0,
             estimated_wastage_kg: 0,
             estimated_output_loss_kg: 0,
             remarks: '',
@@ -145,6 +223,29 @@ export default function DowntimePage() {
         }
     }, [machines, form])
 
+    useEffect(() => {
+        const timer = setInterval(() => setTick(Date.now()), 15_000)
+        return () => clearInterval(timer)
+    }, [])
+
+    const { data: activeRows, isLoading: loadingActive } = useQuery({
+        queryKey: ['downtime-active-shopfloor'],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('downtime_tickets')
+                .select('id, ticket_no, status, stage, reason_code, start_ts, end_ts, created_at, machines(name, code)')
+                .order('created_at', { ascending: false })
+                .limit(30)
+            if (error) throw error
+            return (data || []) as ActiveDowntimeTicket[]
+        },
+        refetchInterval: 15_000,
+    })
+
+    const activeTickets = useMemo(() => {
+        return (activeRows || []).filter((row) => String(row.status || '').toUpperCase() !== 'CLOSED')
+    }, [activeRows, tick])
+
     const onSubmit = async (values: DowntimeFormValues) => {
         if (!user?.id) {
             toast.error('User session not ready. Please sign in again.')
@@ -169,12 +270,14 @@ export default function DowntimePage() {
                 stage: 'CUTTING',
                 reason: 'NO_MATERIAL',
                 reason_other: '',
-                estimated_duration_mins: 0,
                 estimated_wastage_kg: 0,
                 estimated_output_loss_kg: 0,
                 remarks: '',
                 oven_shutdown: false,
             })
+            queryClient.invalidateQueries({ queryKey: ['downtime-active-shopfloor'] })
+            queryClient.invalidateQueries({ queryKey: ['downtime_tickets'] })
+            queryClient.invalidateQueries({ queryKey: ['production-dashboard-live'] })
         } catch (e: any) {
             toast.error("Error", { description: e.message })
         } finally {
@@ -182,9 +285,31 @@ export default function DowntimePage() {
         }
     }
 
+    const stopTicket = async (ticket: ActiveDowntimeTicket) => {
+        if (!user?.id) {
+            toast.error('User session not ready. Please sign in again.')
+            return
+        }
+
+        setStoppingId(ticket.id)
+        try {
+            const note = stopNotes[ticket.id] || ''
+            await stopDowntimeWithFallback(supabase, ticket.id, user.id, note)
+            const mins = getDurationMins(ticket.start_ts)
+            toast.success(`Downtime stopped (${mins} mins)`)
+            queryClient.invalidateQueries({ queryKey: ['downtime-active-shopfloor'] })
+            queryClient.invalidateQueries({ queryKey: ['downtime_tickets'] })
+            queryClient.invalidateQueries({ queryKey: ['production-dashboard-live'] })
+        } catch (e: any) {
+            toast.error('Failed to stop downtime', { description: e.message })
+        } finally {
+            setStoppingId(null)
+        }
+    }
+
     return (
-        <div className="max-w-2xl mx-auto py-6">
-            <Card className="border-red-200 bg-red-50/10">
+        <div className="max-w-6xl mx-auto py-6 grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <Card className="border-red-200 bg-red-50/10 h-fit">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-red-700">
                         <Wrench className="h-5 w-5" />
@@ -255,15 +380,7 @@ export default function DowntimePage() {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                                <Label>Estimated Downtime (mins)</Label>
-                                <Input
-                                    type="number"
-                                    min={0}
-                                    {...form.register('estimated_duration_mins', { valueAsNumber: true })}
-                                />
-                            </div>
+                        <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label>Estimated Wastage (kg)</Label>
                                 <Input
@@ -298,6 +415,66 @@ export default function DowntimePage() {
                             {isSubmitting ? <Loader2 className="animate-spin" /> : "Create Ticket"}
                         </Button>
                     </form>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-2">
+                            <Clock className="h-5 w-5 text-orange-600" />
+                            Active Downtimes
+                        </span>
+                        <Badge variant="destructive">{activeTickets.length}</Badge>
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {loadingActive ? (
+                        <div className="text-sm text-slate-500 flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" /> Loading active downtimes...
+                        </div>
+                    ) : activeTickets.length === 0 ? (
+                        <div className="text-sm text-slate-500">No active downtime tickets.</div>
+                    ) : (
+                        activeTickets.map((ticket) => {
+                            const mins = getDurationMins(ticket.start_ts)
+                            return (
+                                <div key={ticket.id} className="border rounded-lg p-4 space-y-3 bg-white">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div>
+                                            <div className="font-semibold text-sm text-slate-900">
+                                                {ticket.ticket_no || ticket.id.slice(0, 8)} - {getDowntimeReasonLabel(ticket.reason_code)}
+                                            </div>
+                                            <div className="text-xs text-slate-500 mt-1">
+                                                {ticket.stage || 'N/A'} | {ticket.machines?.name || 'Machine N/A'} {ticket.machines?.code ? `(${ticket.machines.code})` : ''}
+                                            </div>
+                                            <div className="text-xs text-slate-500 mt-1">
+                                                Started: {ticket.start_ts ? new Date(ticket.start_ts).toLocaleString() : 'N/A'}
+                                            </div>
+                                        </div>
+                                        <Badge variant="outline" className="font-mono">{mins} mins</Badge>
+                                    </div>
+
+                                    <Input
+                                        placeholder="Closure note (optional)"
+                                        value={stopNotes[ticket.id] || ''}
+                                        onChange={(e) => setStopNotes((prev) => ({ ...prev, [ticket.id]: e.target.value }))}
+                                    />
+
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="w-full border-red-300 text-red-700 hover:bg-red-50"
+                                        disabled={stoppingId === ticket.id}
+                                        onClick={() => stopTicket(ticket)}
+                                    >
+                                        {stoppingId === ticket.id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Square className="h-4 w-4 mr-2" />}
+                                        Stop Active Downtime
+                                    </Button>
+                                </div>
+                            )
+                        })
+                    )}
                 </CardContent>
             </Card>
         </div>

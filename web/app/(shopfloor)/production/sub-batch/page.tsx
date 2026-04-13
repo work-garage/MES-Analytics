@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, Suspense, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/store/auth'
@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { Loader2, PlayCircle, Box, CheckCircle2, Factory, Layers, ArrowRight } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence, type Variants } from 'framer-motion'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 // --- Animation Variants ---
 const fadeUpContainer = {
@@ -31,6 +32,36 @@ const fadeUpItem = {
         transition: { type: "tween", ease: "easeOut", duration: 0.3 } 
     }
 } satisfies Variants
+
+type IngredientRequirement = {
+    material_id: string
+    material_name: string
+    material_code: string
+    required_qty: number
+}
+
+type InventoryLot = {
+    inventory_id: string
+    material_id: string
+    grn_id: string
+    grn_no: string
+    available_qty: number
+    grn_net_qty: number
+    unit_weight: number
+    container_type: string
+    container_units_available: number
+}
+
+type AllocationRow = {
+    row_id: string
+    material_id: string
+    inventory_id: string
+    grn_id: string
+    qty: number
+    container_units: number
+}
+
+const newRowId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
 export default function SubBatchPage() {
     return (
@@ -55,6 +86,10 @@ function SubBatchContent() {
     const [allocationResult, setAllocationResult] = useState<any>(null)
     const [recentBatches, setRecentBatches] = useState<any[]>([])
     const [isMounted, setIsMounted] = useState(false)
+    const [isLoadingMaterials, setIsLoadingMaterials] = useState(false)
+    const [ingredients, setIngredients] = useState<IngredientRequirement[]>([])
+    const [lots, setLots] = useState<InventoryLot[]>([])
+    const [allocations, setAllocations] = useState<AllocationRow[]>([])
 
     useEffect(() => {
         setIsMounted(true)
@@ -92,8 +127,255 @@ function SubBatchContent() {
         }
     })
 
-    const createSubBatchRowsFallback = async (values: any) => {
-        const selectedRecipe = recipes?.find((r: any) => r.id === values.recipe_id)
+    const selectedRecipeId = form.watch('recipe_id')
+    const selectedBatchCount = form.watch('batch_count')
+
+    const lotsByInventoryId = useMemo(() => {
+        const map = new Map<string, InventoryLot>()
+        for (const lot of lots) map.set(lot.inventory_id, lot)
+        return map
+    }, [lots])
+
+    const setAllocationPatch = (rowId: string, patch: Partial<AllocationRow>) => {
+        setAllocations(prev => prev.map(row => row.row_id === rowId ? { ...row, ...patch } : row))
+    }
+
+    const addSourceRow = (materialId: string) => {
+        const firstLot = lots.find(l => l.material_id === materialId)
+        setAllocations(prev => [
+            ...prev,
+            {
+                row_id: newRowId(),
+                material_id: materialId,
+                inventory_id: firstLot?.inventory_id ?? '',
+                grn_id: firstLot?.grn_id ?? '',
+                qty: 0,
+                container_units: 0,
+            }
+        ])
+    }
+
+    const removeSourceRow = (rowId: string) => {
+        setAllocations(prev => prev.filter(row => row.row_id !== rowId))
+    }
+
+    const loadMaterialPlan = async (recipeId: string, batchCountValue: number) => {
+        if (!recipeId) {
+            setIngredients([])
+            setLots([])
+            setAllocations([])
+            return
+        }
+
+        setIsLoadingMaterials(true)
+        try {
+            const requestedCount = Math.max(1, Number(batchCountValue) || 1)
+
+            const { data: recipeItems, error: itemsError } = await supabase
+                .from('recipe_items')
+                .select('material_id, qty_per_batch, materials(name, material_code)')
+                .eq('template_id', recipeId)
+
+            if (itemsError) throw itemsError
+
+            const ingredientReqs: IngredientRequirement[] = (recipeItems || [])
+                .filter((item: any) => item.material_id)
+                .map((item: any) => ({
+                    material_id: item.material_id,
+                    material_name: item.materials?.name ?? 'Unknown',
+                    material_code: item.materials?.material_code ?? '',
+                    required_qty: Number(item.qty_per_batch || 0) * requestedCount,
+                }))
+
+            setIngredients(ingredientReqs)
+
+            const materialIds = [...new Set(ingredientReqs.map(i => i.material_id))]
+            if (materialIds.length === 0) {
+                setLots([])
+                setAllocations([])
+                return
+            }
+
+            const { data: invRows, error: invError } = await supabase
+                .from('main_inventory')
+                .select(`
+                    id,
+                    grn_id,
+                    material_id,
+                    available_qty,
+                    grns ( id, grn_no, net_qty, unit_weight, container_type, status, container_inventory ( units ) )
+                `)
+                .in('material_id', materialIds)
+                .gt('available_qty', 0)
+
+            if (invError) throw invError
+
+            const availableLots: InventoryLot[] = (invRows || [])
+                .filter((row: any) => row.grns?.status === 'RECEIVED')
+                .map((row: any) => ({
+                    inventory_id: row.id,
+                    material_id: row.material_id,
+                    grn_id: row.grn_id,
+                    grn_no: row.grns?.grn_no ?? 'N/A',
+                    available_qty: Number(row.available_qty || 0),
+                    grn_net_qty: Number(row.grns?.net_qty || 0),
+                    unit_weight: Number(row.grns?.unit_weight || 0),
+                    container_type: row.grns?.container_type ?? 'units',
+                    container_units_available: Number(row.grns?.container_inventory?.[0]?.units || 0),
+                }))
+
+            setLots(availableLots)
+
+            const initialAllocations: AllocationRow[] = ingredientReqs.map(req => {
+                const firstLot = availableLots.find(lot => lot.material_id === req.material_id)
+                const allocQty = firstLot ? Math.min(req.required_qty, firstLot.available_qty) : 0
+                const allocUnits = firstLot && firstLot.unit_weight > 0 ? Math.ceil(allocQty / firstLot.unit_weight) : 0
+
+                return {
+                    row_id: newRowId(),
+                    material_id: req.material_id,
+                    inventory_id: firstLot?.inventory_id ?? '',
+                    grn_id: firstLot?.grn_id ?? '',
+                    qty: Number(allocQty.toFixed(3)),
+                    container_units: allocUnits,
+                }
+            })
+
+            setAllocations(initialAllocations)
+        } catch (error: any) {
+            toast.error('Failed to load material requirements', { description: error.message })
+        } finally {
+            setIsLoadingMaterials(false)
+        }
+    }
+
+    useEffect(() => {
+        if (!selectedRecipeId) {
+            setIngredients([])
+            setLots([])
+            setAllocations([])
+            return
+        }
+        loadMaterialPlan(selectedRecipeId, selectedBatchCount)
+    }, [selectedRecipeId, selectedBatchCount])
+
+    const applyMaterialIssue = async () => {
+        if (ingredients.length === 0) {
+            throw new Error('No raw materials found for selected recipe.')
+        }
+
+        const byInventory = new Map<string, { lot: InventoryLot; qty: number; containerUnits: number; materialName: string }>()
+        const byGrnContainer = new Map<string, { grnId: string; units: number; available: number }>()
+        const byGrnQty = new Map<string, { grnId: string; qty: number; netQty: number }>()
+        const summaryRows: Array<{ material_name: string; grn: string; qty: number }> = []
+
+        for (const ingredient of ingredients) {
+            const rows = allocations.filter(a => a.material_id === ingredient.material_id)
+            if (rows.length === 0) {
+                throw new Error(`Allocation missing for ${ingredient.material_name}`)
+            }
+
+            const totalForMaterial = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0)
+            if (totalForMaterial < ingredient.required_qty) {
+                throw new Error(`Insufficient allocation for ${ingredient.material_name}. Required ${ingredient.required_qty.toFixed(2)} kg.`)
+            }
+
+            for (const row of rows) {
+                if (!row.inventory_id) {
+                    throw new Error(`Select GRN lot for ${ingredient.material_name}`)
+                }
+                if (Number(row.qty || 0) <= 0) {
+                    throw new Error(`Allocated quantity must be greater than zero for ${ingredient.material_name}`)
+                }
+
+                const lot = lotsByInventoryId.get(row.inventory_id)
+                if (!lot) {
+                    throw new Error(`Selected lot is not valid anymore for ${ingredient.material_name}`)
+                }
+
+                const invEntry = byInventory.get(row.inventory_id) || {
+                    lot,
+                    qty: 0,
+                    containerUnits: 0,
+                    materialName: ingredient.material_name,
+                }
+                invEntry.qty += Number(row.qty)
+                invEntry.containerUnits += Number(row.container_units || 0)
+                byInventory.set(row.inventory_id, invEntry)
+
+                const containerEntry = byGrnContainer.get(lot.grn_id) || {
+                    grnId: lot.grn_id,
+                    units: 0,
+                    available: lot.container_units_available,
+                }
+                containerEntry.units += Number(row.container_units || 0)
+                byGrnContainer.set(lot.grn_id, containerEntry)
+
+                const grnEntry = byGrnQty.get(lot.grn_id) || {
+                    grnId: lot.grn_id,
+                    qty: 0,
+                    netQty: lot.grn_net_qty,
+                }
+                grnEntry.qty += Number(row.qty)
+                byGrnQty.set(lot.grn_id, grnEntry)
+
+                summaryRows.push({
+                    material_name: ingredient.material_name,
+                    grn: lot.grn_no,
+                    qty: Number(row.qty),
+                })
+            }
+        }
+
+        for (const { lot, qty } of byInventory.values()) {
+            if (qty > lot.available_qty) {
+                throw new Error(`Allocated qty exceeds availability for GRN ${lot.grn_no}`)
+            }
+            if (qty > lot.grn_net_qty) {
+                throw new Error(`Allocated qty exceeds GRN net qty for ${lot.grn_no}`)
+            }
+        }
+
+        for (const entry of byGrnContainer.values()) {
+            if (entry.units > entry.available) {
+                throw new Error('Allocated container units exceed available container count for one or more GRNs.')
+            }
+        }
+
+        const nowIso = new Date().toISOString()
+
+        for (const [inventoryId, entry] of byInventory.entries()) {
+            const nextAvailable = Math.max(entry.lot.available_qty - entry.qty, 0)
+            const { error } = await supabase
+                .from('main_inventory')
+                .update({ available_qty: nextAvailable, last_updated: nowIso })
+                .eq('id', inventoryId)
+            if (error) throw error
+        }
+
+        for (const entry of byGrnQty.values()) {
+            const nextNetQty = Math.max(entry.netQty - entry.qty, 0)
+            const { error } = await supabase
+                .from('grns')
+                .update({ net_qty: nextNetQty })
+                .eq('id', entry.grnId)
+            if (error) throw error
+        }
+
+        for (const entry of byGrnContainer.values()) {
+            if (entry.units <= 0) continue
+            const nextUnits = Math.max(entry.available - entry.units, 0)
+            const { error } = await supabase
+                .from('container_inventory')
+                .update({ units: nextUnits })
+                .eq('grn_id', entry.grnId)
+            if (error) throw error
+        }
+
+        return summaryRows
+    }
+
+    const createSubBatchRows = async (values: any) => {
         const requestedCount = Math.max(1, Number(values.batch_count) || 1)
         const batchStamp = Date.now().toString().slice(-8)
         const masterBatchNo = `MB-${batchStamp}`
@@ -147,48 +429,39 @@ function SubBatchContent() {
             throw insertError || new Error('Unable to create sub-batch with compatible status value')
         }
 
-        setAllocationResult({
-            batch_id: insertedRows?.[0]?.sub_batch_no || masterBatch.master_batch_no || insertedRows?.[0]?.id || 'CREATED',
-            allocations: []
-        })
-
-        toast.success('Sub-batches started', {
-            description: `${requestedCount} run(s) created for ${selectedRecipe?.sku || 'selected recipe'}.`
-        })
+        return {
+            masterBatchNo: masterBatch.master_batch_no,
+            insertedRows,
+        }
     }
 
     const onStartBatch = async (values: any) => {
+        if (!user?.id) {
+            toast.error('You must be logged in to start a sub-batch.')
+            return
+        }
+
         setIsSubmitting(true)
         setAllocationResult(null)
         try {
             const selectedRecipe = recipes?.find((r: any) => r.id === values.recipe_id)
+            const issuedSummary = await applyMaterialIssue()
+            const created = await createSubBatchRows(values)
 
-            const { data, error } = await supabase.rpc('rpc_create_sub_batch', {
-                p_recipe_template_id: values.recipe_id,
-                p_sku: selectedRecipe?.sku,
-                p_shift: values.shift,
-                p_batch_count: Number(values.batch_count),
-                p_operator_id: user?.id
+            setAllocationResult({
+                batch_id: created.insertedRows?.[0]?.sub_batch_no || created.masterBatchNo,
+                allocations: issuedSummary,
             })
 
-            if (error) {
-                const message = (error.message || '').toLowerCase()
-                if (message.includes('column "batch_id" of relation "sub_batches" does not exist')) {
-                    await createSubBatchRowsFallback(values)
-                } else {
-                    throw error
-                }
-            } else {
-                setAllocationResult(data)
-                toast.success("Batches Created & Materials Reserved")
-            }
+            toast.success('Sub-batch started and raw materials issued', {
+                description: `${created.insertedRows.length} run(s) created for ${selectedRecipe?.sku || 'selected recipe'}.`
+            })
 
-            // Redirect to Mixing Queue after a brief pause so user can see the allocation
-            setTimeout(() => router.push('/production/mixing'), 2000)
-            refetchBatches() 
-
+            // Redirect to Mixing Queue after a brief pause so user can see issued materials.
+            setTimeout(() => router.push(WORKFLOW_SEQUENCE.afterSubBatchStart), 2000)
+            refetchBatches()
         } catch (error: any) {
-            toast.error("Failed to Start Batch", { description: error.message })
+            toast.error('Failed to Start Batch', { description: error.message })
         } finally {
             setIsSubmitting(false)
         }
@@ -270,11 +543,123 @@ function SubBatchContent() {
                                     </div>
                                 </div>
 
+                                <div className="space-y-4 border border-gray-200 rounded-xl p-4 bg-gray-50/60">
+                                    <div>
+                                        <h3 className="text-sm font-bold text-gray-800">Raw Material Source Selection</h3>
+                                        <p className="text-xs text-gray-500 mt-1">Choose GRN lots for each recipe item. Inventory is deducted immediately on sub-batch start.</p>
+                                    </div>
+
+                                    {isLoadingMaterials && (
+                                        <div className="text-sm text-gray-500">Loading recipe materials and available lots...</div>
+                                    )}
+
+                                    {!isLoadingMaterials && selectedRecipeId && ingredients.length === 0 && (
+                                        <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded p-3">
+                                            No recipe materials found for this SKU. Configure recipe items before starting production.
+                                        </div>
+                                    )}
+
+                                    {!isLoadingMaterials && ingredients.map((ingredient) => {
+                                        const rows = allocations.filter(a => a.material_id === ingredient.material_id)
+                                        const allocatedQty = rows.reduce((sum, row) => sum + Number(row.qty || 0), 0)
+                                        const lotOptions = lots.filter(lot => lot.material_id === ingredient.material_id)
+
+                                        return (
+                                            <div key={ingredient.material_id} className="bg-white border border-gray-200 rounded-lg p-3 space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div>
+                                                        <p className="font-semibold text-sm text-gray-900">{ingredient.material_name} <span className="text-xs text-gray-500">({ingredient.material_code})</span></p>
+                                                        <p className="text-xs text-gray-500">Required: {ingredient.required_qty.toFixed(2)} kg</p>
+                                                    </div>
+                                                    <p className={`text-xs font-semibold ${allocatedQty >= ingredient.required_qty ? 'text-green-700' : 'text-amber-700'}`}>
+                                                        Allocated: {allocatedQty.toFixed(2)} kg
+                                                    </p>
+                                                </div>
+
+                                                {rows.map((row, rowIndex) => {
+                                                    const selectedLot = row.inventory_id ? lotsByInventoryId.get(row.inventory_id) : undefined
+
+                                                    return (
+                                                        <div key={row.row_id} className="grid grid-cols-1 md:grid-cols-12 gap-2">
+                                                            <div className="md:col-span-6 space-y-1">
+                                                                <Label className="text-xs">GRN Lot</Label>
+                                                                <Select
+                                                                    value={row.inventory_id}
+                                                                    onValueChange={(inventoryId) => {
+                                                                        const lot = lotsByInventoryId.get(inventoryId)
+                                                                        setAllocationPatch(row.row_id, {
+                                                                            inventory_id: inventoryId,
+                                                                            grn_id: lot?.grn_id ?? '',
+                                                                            container_units: 0,
+                                                                        })
+                                                                    }}
+                                                                >
+                                                                    <SelectTrigger className="h-10 bg-white">
+                                                                        <SelectValue placeholder="Select GRN lot" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {lotOptions.map((opt) => (
+                                                                            <SelectItem key={opt.inventory_id} value={opt.inventory_id}>
+                                                                                {opt.grn_no} | {opt.available_qty.toFixed(2)} kg | {opt.container_units_available} {opt.container_type}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+
+                                                            <div className="md:col-span-2 space-y-1">
+                                                                <Label className="text-xs">Qty (kg)</Label>
+                                                                <Input
+                                                                    type="number"
+                                                                    step="0.001"
+                                                                    className="h-10"
+                                                                    value={row.qty}
+                                                                    onChange={(event) => setAllocationPatch(row.row_id, { qty: Number(event.target.value || 0) })}
+                                                                />
+                                                            </div>
+
+                                                            <div className="md:col-span-3 space-y-1">
+                                                                <Label className="text-xs">Containers</Label>
+                                                                <Input
+                                                                    type="number"
+                                                                    min={0}
+                                                                    className="h-10"
+                                                                    value={row.container_units}
+                                                                    onChange={(event) => setAllocationPatch(row.row_id, { container_units: Number(event.target.value || 0) })}
+                                                                />
+                                                                {selectedLot && (
+                                                                    <p className="text-[11px] text-gray-500">Available: {selectedLot.container_units_available} {selectedLot.container_type}</p>
+                                                                )}
+                                                            </div>
+
+                                                            <div className="md:col-span-1 flex items-end">
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    className="h-10 w-full"
+                                                                    disabled={rowIndex === 0 && rows.length === 1}
+                                                                    onClick={() => removeSourceRow(row.row_id)}
+                                                                >
+                                                                    -
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })}
+
+                                                <Button type="button" variant="outline" className="h-9" onClick={() => addSourceRow(ingredient.material_id)}>
+                                                    Add Source Lot
+                                                </Button>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+
                                 <div className="mt-auto pt-8">
                                     <Button 
                                         type="submit" 
                                         className="w-full h-14 text-base font-semibold bg-black hover:bg-gray-800 text-white shadow-md transition-all group" 
-                                        disabled={isSubmitting}
+                                        disabled={isSubmitting || isLoadingMaterials || !selectedRecipeId || ingredients.length === 0}
                                     >
                                         {isSubmitting ? (
                                             <Loader2 className="animate-spin h-5 w-5" />
@@ -349,6 +734,7 @@ function SubBatchContent() {
                                                     {allocationResult.allocations?.map((a: any, i: number) => (
                                                         <div key={i} className="flex justify-between items-center p-3 border-b border-dashed border-gray-200 last:border-0 hover:bg-gray-50 transition-colors">
                                                             <div className="flex flex-col">
+                                                                <span className="text-[11px] text-gray-600 font-semibold">{a.material_name}</span>
                                                                 <span className="text-[10px] text-gray-400 font-semibold uppercase">GRN Lot</span>
                                                                 <span className="font-mono text-sm text-gray-900">{a.grn}</span>
                                                             </div>

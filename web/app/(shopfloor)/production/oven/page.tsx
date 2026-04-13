@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator'
 import { toast } from 'sonner'
 import { Loader2, Flame } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 export default function BakingPage() {
     return (
@@ -23,6 +25,7 @@ export default function BakingPage() {
 }
 
 function BakingContent() {
+    const router = useRouter()
     const supabase = createClient()
     const { user } = useAuth()
     const [isSubmitting, setIsSubmitting] = useState(false)
@@ -69,6 +72,7 @@ function BakingContent() {
             toast.success("Baking Check Logged")
             form.reset({ ...values, moisture: 0, sample_weight: 0 }) // Keep machine settings, reset measurements
             refetchLogs()
+            setTimeout(() => router.push(WORKFLOW_SEQUENCE.afterOvenSubmit), 1500)
 
         } catch (e: any) {
             toast.error("Error", { description: e.message })

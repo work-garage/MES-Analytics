@@ -17,6 +17,7 @@ import { useAuth } from '@/lib/store/auth'
 import PhotoCapture from '@/components/business/PhotoCapture'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 export default function QAPage() {
     return (
@@ -268,7 +269,7 @@ function QAPageContent() {
                 toast.success('QA accepted. Proceed to Stores and click Create GRN.')
             }
 
-            router.push(`/stores/grn-create?entry_id=${gateEntryId}`)
+            router.push(`${WORKFLOW_SEQUENCE.afterQaAccept}?entry_id=${gateEntryId}`)
         } catch (err: any) {
             toast.error('Submission Failed', { description: err.message })
         } finally {

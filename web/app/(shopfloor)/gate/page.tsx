@@ -19,6 +19,7 @@ import PhotoCapture from '@/components/business/PhotoCapture'
 import { Loader2, Fingerprint, PauseCircle, ArrowRight } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 export default function GateEntryPage() {
     return (
@@ -120,7 +121,7 @@ function GateEntryContent() {
                 refetch() // Refresh held entries list
             } else {
                 toast.success('Gate Entry Recorded', { description: `Entry No: ${data?.entry_number ?? ''}` })
-                router.push(`/weighbridge?entry_id=${data?.id}`)
+                router.push(`${WORKFLOW_SEQUENCE.afterGateSubmit}?entry_id=${data?.id}`)
             }
         } catch (error: any) {
             toast.error('Submission Failed', { description: error.message })

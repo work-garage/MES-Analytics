@@ -14,6 +14,7 @@ import { Loader2, Package } from 'lucide-react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
 import PhotoCapture from '@/components/business/PhotoCapture'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 export default function CreateGRNPage() {
     return (
@@ -283,7 +284,7 @@ function CreateGRNContent() {
                 })
 
                 toast.success(`GRN Finalized: ${existingGrn.grn_no}`)
-                router.push('/stores/inventory')
+                router.push(WORKFLOW_SEQUENCE.afterGrnFinalize)
                 return
             }
 
@@ -380,7 +381,7 @@ function CreateGRNContent() {
                 itc_expiry_date: createdGrn?.itc_expiry_date || null,
                 created_at: createdGrn?.created_at || null
             })
-            router.push('/stores/inventory')
+            router.push(WORKFLOW_SEQUENCE.afterGrnFinalize)
 
         } catch (error: any) {
             toast.error("Failed to Create GRN", { description: error.message })

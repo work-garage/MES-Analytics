@@ -24,6 +24,8 @@ import { useQuery } from '@tanstack/react-query'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import PhotoCapture from '@/components/business/PhotoCapture'
 import { motion, AnimatePresence, type Variants } from 'framer-motion'
+import { useRouter } from 'next/navigation'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 // --- Animation Variants ---
 const fadeUpContainer = {
@@ -63,6 +65,7 @@ export default function DispatchPage() {
 }
 
 function DispatchContent() {
+    const router = useRouter()
     const supabase = createClient()
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [isMounted, setIsMounted] = useState(false)
@@ -180,6 +183,7 @@ function DispatchContent() {
                 photo: null
             })
             refetchDispatches()
+            setTimeout(() => router.push(WORKFLOW_SEQUENCE.afterDispatchSubmit), 1200)
 
         } catch (e: any) {
             toast.error("Dispatch Failed", { description: e.message })

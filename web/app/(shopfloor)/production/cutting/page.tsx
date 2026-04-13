@@ -14,6 +14,7 @@ import { Loader2, Scissors, Scale } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import PhotoCapture from '@/components/business/PhotoCapture'
 import { useRouter } from 'next/navigation'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 export default function CuttingPage() {
     return (
@@ -75,8 +76,8 @@ function CuttingContent() {
 
             if (error) throw error
             toast.success("Sample Logged")
-            // Redirect to Packing
-            setTimeout(() => router.push('/production/packing'), 1500)
+            // Redirect to Oven stage next in production sequence.
+            setTimeout(() => router.push(WORKFLOW_SEQUENCE.afterCuttingSubmit), 1500)
             sampleForm.reset()
             refetchSamples()
         } catch (e: any) {

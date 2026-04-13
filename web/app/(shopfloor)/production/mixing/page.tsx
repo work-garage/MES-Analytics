@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query'
 import PhotoCapture from '@/components/business/PhotoCapture'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence, type Variants } from 'framer-motion'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 // --- Animation Variants ---
 const fadeUpContainer = {
@@ -107,8 +108,25 @@ function MixingContent() {
             if (error) {
                 const msg = (error.message || '').toLowerCase()
                 if (msg.includes('column "material_id" of relation "premix_logs" does not exist')) {
-                    toast.warning('Premix schema is out of sync; continuing without saving this premix log.')
+                    const nowIso = new Date().toISOString()
+                    const { error: fallbackError } = await supabase
+                        .from('premix_logs')
+                        .insert({
+                            sub_batch_id: values.sub_batch_id,
+                            grn_allocations: null,
+                            target_qty: Number(values.target_qty || 0),
+                            actual_weighed_qty: Number(values.actual_qty || 0),
+                            operator_id: user?.id ?? null,
+                            start_time: nowIso,
+                            end_time: nowIso,
+                            photo_path: photoPath,
+                        })
+
+                    if (fallbackError) throw fallbackError
+
+                    toast.success('Premix logged via compatibility fallback')
                     premixForm.reset({ sub_batch_id: activeBatchId })
+                    refetchBatches()
                     return
                 }
                 throw error
@@ -140,7 +158,7 @@ function MixingContent() {
             })
             if (error) throw error
             toast.success("Mixing Process Logged")
-            setTimeout(() => router.push('/production/cutting'), 1500)
+            setTimeout(() => router.push(WORKFLOW_SEQUENCE.afterMixingSubmit), 1500)
             mixingForm.reset()
             refetchBatches()
         } catch (e: any) {

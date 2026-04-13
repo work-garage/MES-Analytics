@@ -15,6 +15,7 @@ import { Loader2, PackageOpen } from 'lucide-react'
 
 import PhotoCapture from '@/components/business/PhotoCapture'
 import { useRouter } from 'next/navigation'
+import { WORKFLOW_SEQUENCE } from '@/lib/workflow/sequence'
 
 export default function PackingPage() {
     return (
@@ -85,7 +86,7 @@ function PackingContent() {
             })
             refetchLogs()
             // Redirect to FG Batch
-            setTimeout(() => router.push('/production/fg-batch'), 1500)
+            setTimeout(() => router.push(WORKFLOW_SEQUENCE.afterPackingSubmit), 1500)
         } catch (e: any) {
             toast.error("Error", { description: e.message })
         } finally {
