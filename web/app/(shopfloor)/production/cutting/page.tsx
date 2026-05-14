@@ -32,8 +32,8 @@ function CuttingContent() {
     const hasPersistedSample = async (stackType: string, weight: number) => {
         const windowStartIso = new Date(Date.now() - 2 * 60 * 1000).toISOString()
         const { data, error } = await supabase
-            .from('cutting_logs')
-            .select('id, stack_type, weight, created_at')
+            .from('stack_samples')
+            .select('id, stack_type, weight_g, created_at')
             .eq('stack_type', stackType)
             .gte('created_at', windowStartIso)
             .order('created_at', { ascending: false })
@@ -41,27 +41,26 @@ function CuttingContent() {
 
         if (error) throw error
 
-        return (data || []).some((row: any) => Math.abs(Number(row.weight || 0) - weight) <= 0.01)
+        return (data || []).some((row: any) => Math.abs(Number(row.weight_g || 0) - weight) <= 0.01)
     }
 
     const tryFallbackInsert = async (stackType: string, weight: number, photoPath: string | null) => {
         const richAttempt = await supabase
-            .from('cutting_logs')
+            .from('stack_samples')
             .insert({
                 machine_id: 'CUTTER-01',
                 stack_type: stackType,
-                weight,
-                rpm,
-                photo: photoPath,
+                weight_g: weight,
+                photo_path: photoPath,
             })
 
         if (!richAttempt.error) return
 
         const minimalAttempt = await supabase
-            .from('cutting_logs')
+            .from('stack_samples')
             .insert({
                 stack_type: stackType,
-                weight,
+                weight_g: weight,
             })
 
         if (minimalAttempt.error) {
@@ -89,7 +88,7 @@ function CuttingContent() {
     const { data: recentSamples, refetch: refetchSamples } = useQuery({
         queryKey: ['cutting-samples'],
         queryFn: async () => {
-            const { data } = await supabase.from('cutting_logs')
+            const { data } = await supabase.from('stack_samples')
                 .select('*')
                 .order('created_at', { ascending: false })
                 .limit(5)
@@ -127,7 +126,7 @@ function CuttingContent() {
 
             const persistedAfterFallback = await hasPersistedSample(sampleStackType, sampleWeight)
             if (!persistedAfterFallback) {
-                throw new Error('Cutting sample did not persist to cutting_logs, so supervisor coverage would stay stale.')
+                throw new Error('Cutting sample did not persist to stack_samples, so supervisor coverage would stay stale.')
             }
 
             toast.success("Sample Logged")

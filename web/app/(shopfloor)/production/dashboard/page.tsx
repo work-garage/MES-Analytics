@@ -291,7 +291,7 @@ export default function ProductionDashboard() {
                     .from('sub_batches')
                     .select('id'),
                 supabase
-                    .from('cutting_logs')
+                    .from('stack_samples')
                     .select('id'),
                 supabase
                     .from('baking_process_logs')
@@ -720,7 +720,7 @@ export default function ProductionDashboard() {
                 },
                 {
                     route: '/production/cutting',
-                    table: 'cutting_logs',
+                    table: 'stack_samples',
                     records: cuttingRes.data?.length || 0,
                     capturedFields: 'stack_type/weight/rpm/photo/machine',
                 },

@@ -234,7 +234,12 @@ function SubBatchContent() {
             const initialAllocations: AllocationRow[] = ingredientReqs.map(req => {
                 const firstLot = availableLots.find(lot => lot.material_id === req.material_id)
                 const allocQty = firstLot ? Math.min(req.required_qty, firstLot.available_qty) : 0
-                const allocUnits = firstLot && firstLot.unit_weight > 0 ? Math.ceil(allocQty / firstLot.unit_weight) : 0
+                let allocUnits = firstLot && firstLot.unit_weight > 0 ? Math.ceil(allocQty / firstLot.unit_weight) : 0
+
+                // Clamp to prevent exceeding container count when bulk quantity is still available
+                if (firstLot && allocUnits > firstLot.container_units_available) {
+                    allocUnits = firstLot.container_units_available
+                }
 
                 return {
                     row_id: newRowId(),
