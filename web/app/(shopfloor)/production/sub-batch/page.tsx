@@ -63,6 +63,8 @@ type AllocationRow = {
 
 const newRowId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 
+const ALLOCATABLE_GRN_STATUSES = new Set(['RECEIVED', 'AVAILABLE'])
+
 export default function SubBatchPage() {
     return (
         <Suspense fallback={
@@ -181,7 +183,7 @@ function SubBatchContent() {
             const ingredientReqs: IngredientRequirement[] = (recipeItems || [])
                 .filter((item: any) => item.material_id)
                 .map((item: any) => ({
-                    material_id: item.material_id,
+                    material_id: String(item.material_id),
                     material_name: item.materials?.name ?? 'Unknown',
                     material_code: item.materials?.material_code ?? '',
                     required_qty: Number(item.qty_per_batch || 0) * requestedCount,
@@ -211,11 +213,14 @@ function SubBatchContent() {
             if (invError) throw invError
 
             const availableLots: InventoryLot[] = (invRows || [])
-                .filter((row: any) => row.grns?.status === 'RECEIVED')
+                .filter((row: any) => {
+                    const status = String(row.grns?.status || '').toUpperCase()
+                    return !status || ALLOCATABLE_GRN_STATUSES.has(status)
+                })
                 .map((row: any) => ({
-                    inventory_id: row.id,
-                    material_id: row.material_id,
-                    grn_id: row.grn_id,
+                    inventory_id: String(row.id),
+                    material_id: String(row.material_id),
+                    grn_id: String(row.grn_id),
                     grn_no: row.grns?.grn_no ?? 'N/A',
                     available_qty: Number(row.available_qty || 0),
                     grn_net_qty: Number(row.grns?.net_qty || 0),
@@ -593,6 +598,7 @@ function SubBatchContent() {
                                                                             container_units: 0,
                                                                         })
                                                                     }}
+                                                                    disabled={lotOptions.length === 0}
                                                                 >
                                                                     <SelectTrigger className="h-10 bg-white">
                                                                         <SelectValue placeholder="Select GRN lot" />
@@ -647,7 +653,19 @@ function SubBatchContent() {
                                                     )
                                                 })}
 
-                                                <Button type="button" variant="outline" className="h-9" onClick={() => addSourceRow(ingredient.material_id)}>
+                                                {lotOptions.length === 0 && (
+                                                    <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">
+                                                        No allocatable GRN lots found for this material. Finalize the GRN in Stores or verify stock exists in main inventory.
+                                                    </div>
+                                                )}
+
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="h-9"
+                                                    onClick={() => addSourceRow(ingredient.material_id)}
+                                                    disabled={lotOptions.length === 0}
+                                                >
                                                     Add Source Lot
                                                 </Button>
                                             </div>

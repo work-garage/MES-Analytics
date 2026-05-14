@@ -3,6 +3,7 @@
 import React from "react"
 import Link from "next/link"
 import { motion, type Variants } from "framer-motion"
+import { PowerBIEmbedCard } from "@/components/business/PowerBIEmbedCard"
 import { 
     Factory, 
     Cog, 
@@ -281,6 +282,8 @@ export default function MainDashboard() {
                     </motion.div>
 
                 </motion.div>
+
+                <PowerBIEmbedCard />
 
                 {/* Optional subtle footer / status */}
                 <div className="mt-16 pt-6 border-t border-gray-100 text-center text-xs text-gray-400">
