@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
     AreaChart,
     Area,
@@ -226,6 +226,7 @@ function buildRecipeMix(rows: PackingLogRow[], recipeNameMap: Map<string, string
 
 export default function ProductionDashboard() {
     const supabase = createClient()
+    const queryClient = useQueryClient()
     const [isMounted, setIsMounted] = useState(false)
     const [currentTime, setCurrentTime] = useState('')
 
@@ -234,8 +235,38 @@ export default function ProductionDashboard() {
         const updateTime = () => setCurrentTime(new Date().toLocaleTimeString('en-US', { hour12: false }))
         updateTime()
         const timer = setInterval(updateTime, 1000)
-        return () => clearInterval(timer)
-    }, [])
+
+        // Setup real-time subscriptions for all related tables
+        const tables = [
+            'packing_process_logs',
+            'downtime_tickets',
+            'gate_entries',
+            'qa_inspections',
+            'sub_batches',
+            'stack_samples',
+            'baking_process_logs',
+            'fg_batches',
+            'dispatches',
+            'recipe_templates',
+            'recipe_items',
+            'main_inventory'
+        ]
+
+        const channel = supabase.channel('dashboard-live-updates')
+        
+        tables.forEach((table) => {
+            channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+                queryClient.invalidateQueries({ queryKey: ['production-dashboard-live'] })
+            })
+        })
+
+        channel.subscribe()
+
+        return () => {
+            clearInterval(timer)
+            supabase.removeChannel(channel)
+        }
+    }, [supabase, queryClient])
 
     const { data: dashboardData } = useQuery<DashboardData>({
         queryKey: ['production-dashboard-live', new Date().toDateString()],

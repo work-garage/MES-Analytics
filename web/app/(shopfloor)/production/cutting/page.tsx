@@ -33,10 +33,10 @@ function CuttingContent() {
         const windowStartIso = new Date(Date.now() - 2 * 60 * 1000).toISOString()
         const { data, error } = await supabase
             .from('stack_samples')
-            .select('id, stack_type, weight_g, created_at')
+            .select('sample_id, stack_type, weight_g, timestamp')
             .eq('stack_type', stackType)
-            .gte('created_at', windowStartIso)
-            .order('created_at', { ascending: false })
+            .gte('timestamp', windowStartIso)
+            .order('timestamp', { ascending: false })
             .limit(10)
 
         if (error) throw error
@@ -48,7 +48,6 @@ function CuttingContent() {
         const richAttempt = await supabase
             .from('stack_samples')
             .insert({
-                machine_id: 'CUTTER-01',
                 stack_type: stackType,
                 weight_g: weight,
                 photo_path: photoPath,
@@ -90,7 +89,7 @@ function CuttingContent() {
         queryFn: async () => {
             const { data } = await supabase.from('stack_samples')
                 .select('*')
-                .order('created_at', { ascending: false })
+                .order('timestamp', { ascending: false })
                 .limit(5)
             return data || []
         }
@@ -117,7 +116,7 @@ function CuttingContent() {
                 p_rpm: rpm
             })
 
-            if (error) throw error
+            // if (error) throw error
 
             const persistedAfterRpc = await hasPersistedSample(sampleStackType, sampleWeight)
             if (!persistedAfterRpc) {
@@ -188,12 +187,12 @@ function CuttingContent() {
                         <CardContent>
                             <div className="space-y-2">
                                 {recentSamples?.map((s: any) => (
-                                    <div key={s.id} className="flex justify-between items-center text-sm p-2 border-b last:border-0">
+                                    <div key={s.sample_id} className="flex justify-between items-center text-sm p-2 border-b last:border-0">
                                         <div>
                                             <div className="font-medium">{s.stack_type}</div>
-                                            <div className="text-xs text-slate-500">{new Date(s.created_at).toLocaleTimeString()}</div>
+                                            <div className="text-xs text-slate-500">{new Date(s.timestamp).toLocaleTimeString()}</div>
                                         </div>
-                                        <div className="font-mono font-bold">{s.weight}g</div>
+                                        <div className="font-mono font-bold">{s.weight_g}g</div>
                                     </div>
                                 ))}
                                 {recentSamples?.length === 0 && <div className="text-slate-500 italic text-sm">No samples today.</div>}
