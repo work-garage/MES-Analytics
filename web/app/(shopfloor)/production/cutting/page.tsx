@@ -33,7 +33,7 @@ function CuttingContent() {
         const windowStartIso = new Date(Date.now() - 2 * 60 * 1000).toISOString()
         const { data, error } = await supabase
             .from('stack_samples')
-            .select('sample_id, stack_type, weight_g, timestamp')
+            .select('id, stack_type, weight_g, timestamp')
             .eq('stack_type', stackType)
             .gte('timestamp', windowStartIso)
             .order('timestamp', { ascending: false })
@@ -187,7 +187,7 @@ function CuttingContent() {
                         <CardContent>
                             <div className="space-y-2">
                                 {recentSamples?.map((s: any) => (
-                                    <div key={s.sample_id} className="flex justify-between items-center text-sm p-2 border-b last:border-0">
+                                    <div key={s.id} className="flex justify-between items-center text-sm p-2 border-b last:border-0">
                                         <div>
                                             <div className="font-medium">{s.stack_type}</div>
                                             <div className="text-xs text-slate-500">{new Date(s.timestamp).toLocaleTimeString()}</div>

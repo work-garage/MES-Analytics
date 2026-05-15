@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import Link from 'next/link'
 import { BackButton } from '@/components/ui/back-button'
 import TopNotifications from '@/components/business/TopNotifications'
+import { MockDataAutoFill } from '@/components/business/MockDataAutoFill'
 
 export default function ShopfloorLayout({
     children,
@@ -74,6 +75,8 @@ export default function ShopfloorLayout({
             <main className="flex-1 p-4 overflow-y-auto">
                 {children}
             </main>
+
+            <MockDataAutoFill />
 
             {/* Tablet Bottom Nav (for quick access) */}
             <nav className="bg-white border-t h-16 flex items-center justify-around md:hidden sticky bottom-0 z-10">
